@@ -1,0 +1,327 @@
+/**
+ * @file Core indexer that orchestrates the entire hikma-engine pipeline.
+ *       Manages the workflow of file discovery, parsing, analysis, and persistence
+ *       with support for incremental indexing and comprehensive error handling.
+ */
+
+import { FileScanner } from '../modules/file-scanner';
+import { AstParser } from '../modules/ast-parser';
+import { GitAnalyzer } from '../modules/git-analyzer';
+import { SummaryGenerator } from '../modules/summary-generator';
+import { EmbeddingService } from '../modules/embedding-service';
+import { DataLoader } from '../modules/data-loader';
+import { NodeWithEmbedding, Edge, FileNode, DirectoryNode } from '../types';
+import { ConfigManager } from '../config';
+import { Logger, getLogger } from '../utils/logger';
+
+export interface IndexingResult {
+  totalNodes: number;
+  totalEdges: number;
+  processedFiles: number;
+  isIncremental: boolean;
+  duration: number;
+  errors: string[];
+}
+
+export interface IndexingOptions {
+  forceFullIndex?: boolean;
+  skipAISummary?: boolean;
+  skipEmbeddings?: boolean;
+  dryRun?: boolean;
+}
+
+/**
+ * Core indexer class that orchestrates the entire knowledge graph building process.
+ */
+export class Indexer {
+  private projectRoot: string;
+  private config: ConfigManager;
+  private logger: Logger;
+  private errors: string[] = [];
+
+  constructor(projectRoot: string, config: ConfigManager) {
+    this.projectRoot = projectRoot;
+    this.config = config;
+    this.logger = getLogger('Indexer');
+  }
+
+  /**
+   * Executes the complete indexing pipeline.
+   */
+  async run(options: IndexingOptions = {}): Promise<IndexingResult> {
+    const startTime = Date.now();
+    this.logger.info('Starting hikma-engine indexing pipeline', { 
+      projectRoot: this.projectRoot,
+      options 
+    });
+
+    try {
+      // Phase 0: Initialize and determine indexing strategy
+      const indexingStrategy = await this.determineIndexingStrategy(options);
+      this.logger.info('Indexing strategy determined', indexingStrategy);
+
+      // Phase 1: File Discovery
+      const filesToProcess = await this.discoverFiles(indexingStrategy);
+      this.logger.info(`Discovered ${filesToProcess.length} files to process`);
+
+      if (filesToProcess.length === 0) {
+        this.logger.info('No files to process, indexing complete');
+        return this.createResult(startTime, 0, 0, filesToProcess.length, indexingStrategy.isIncremental);
+      }
+
+      // Phase 2: AST Parsing and Structure Extraction
+      const { nodes: astNodes, edges: astEdges } = await this.parseAndExtractStructure(filesToProcess);
+      this.logger.info(`Extracted ${astNodes.length} nodes and ${astEdges.length} edges from AST parsing`);
+
+      // Phase 3: AI Summary Generation (optional)
+      const nodesWithSummaries = options.skipAISummary 
+        ? astNodes 
+        : await this.generateAISummaries(astNodes);
+      this.logger.info('AI summary generation completed');
+
+      // Phase 4: Git Analysis
+      const { nodes: gitNodes, edges: gitEdges } = await this.analyzeGitHistory(
+        nodesWithSummaries.filter(n => n.type === 'FileNode') as FileNode[],
+        indexingStrategy.lastCommitHash
+      );
+      this.logger.info(`Analyzed Git history: ${gitNodes.length} nodes, ${gitEdges.length} edges`);
+
+      // Phase 5: Combine all nodes and edges
+      const allNodes = [...nodesWithSummaries, ...gitNodes];
+      const allEdges = [...astEdges, ...gitEdges];
+      this.logger.info(`Total nodes: ${allNodes.length}, Total edges: ${allEdges.length}`);
+
+      // Phase 6: Embedding Generation (optional)
+      const nodesWithEmbeddings = options.skipEmbeddings 
+        ? allNodes.map(node => ({ ...node, embedding: [] })) as NodeWithEmbedding[]
+        : await this.generateEmbeddings(allNodes);
+      this.logger.info(`Generated embeddings for ${nodesWithEmbeddings.length} nodes`);
+
+      // Phase 7: Data Persistence (skip if dry run)
+      if (!options.dryRun) {
+        await this.persistData(nodesWithEmbeddings, allEdges);
+        await this.updateIndexingState(indexingStrategy.currentCommitHash);
+        this.logger.info('Data persistence completed');
+      } else {
+        this.logger.info('Dry run mode: skipping data persistence');
+      }
+
+      const result = this.createResult(startTime, allNodes.length, allEdges.length, filesToProcess.length, indexingStrategy.isIncremental);
+      this.logger.info('Indexing pipeline completed successfully', result);
+      return result;
+
+    } catch (error) {
+      this.logger.error('Indexing pipeline failed', { error: error.message });
+      this.errors.push(error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Determines the indexing strategy (full vs incremental).
+   */
+  private async determineIndexingStrategy(options: IndexingOptions): Promise<{
+    isIncremental: boolean;
+    lastCommitHash: string | null;
+    currentCommitHash: string | null;
+    changedFiles: string[];
+  }> {
+    const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
+    
+    try {
+      const currentCommitHash = await gitAnalyzer.getCurrentCommitHash();
+      
+      if (options.forceFullIndex) {
+        return {
+          isIncremental: false,
+          lastCommitHash: null,
+          currentCommitHash,
+          changedFiles: [],
+        };
+      }
+
+      const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
+      
+      if (!lastCommitHash || !currentCommitHash) {
+        return {
+          isIncremental: false,
+          lastCommitHash: null,
+          currentCommitHash,
+          changedFiles: [],
+        };
+      }
+
+      if (lastCommitHash === currentCommitHash) {
+        this.logger.info('No new commits since last indexing');
+        return {
+          isIncremental: true,
+          lastCommitHash,
+          currentCommitHash,
+          changedFiles: [],
+        };
+      }
+
+      const changedFiles = await gitAnalyzer.getChangedFiles(lastCommitHash, currentCommitHash);
+      
+      return {
+        isIncremental: true,
+        lastCommitHash,
+        currentCommitHash,
+        changedFiles,
+      };
+    } catch (error) {
+      this.logger.warn('Failed to determine incremental strategy, falling back to full index', { error: error.message });
+      return {
+        isIncremental: false,
+        lastCommitHash: null,
+        currentCommitHash: null,
+        changedFiles: [],
+      };
+    }
+  }
+
+  /**
+   * Discovers files to be processed based on the indexing strategy.
+   */
+  private async discoverFiles(strategy: { changedFiles: string[] }): Promise<string[]> {
+    const fileScanner = new FileScanner(this.projectRoot, this.config);
+    const indexingConfig = this.config.getIndexingConfig();
+    
+    return await fileScanner.findAllFiles(
+      indexingConfig.filePatterns,
+      strategy.changedFiles.length > 0 ? strategy.changedFiles : undefined
+    );
+  }
+
+  /**
+   * Parses files and extracts structural information.
+   */
+  private async parseAndExtractStructure(files: string[]): Promise<{
+    nodes: (import('../types').CodeNode | FileNode | import('../types').DirectoryNode | import('../types').TestNode)[];
+    edges: Edge[];
+  }> {
+    const astParser = new AstParser(this.projectRoot, this.config);
+    await astParser.parseFiles(files);
+    
+    return {
+      nodes: astParser.getNodes(),
+      edges: astParser.getEdges(),
+    };
+  }
+
+  /**
+   * Generates AI summaries for file and directory nodes.
+   */
+  private async generateAISummaries(nodes: any[]): Promise<any[]> {
+    const summaryGenerator = new SummaryGenerator(this.config);
+    await summaryGenerator.loadModel();
+
+    const fileNodes = nodes.filter(n => n.type === 'FileNode') as FileNode[];
+    const directoryNodes = nodes.filter(n => n.type === 'DirectoryNode') as DirectoryNode[];
+    const otherNodes = nodes.filter(n => n.type !== 'FileNode' && n.type !== 'DirectoryNode');
+
+    const [summarizedFileNodes, summarizedDirectoryNodes] = await Promise.all([
+      summaryGenerator.summarizeFileNodes(fileNodes),
+      summaryGenerator.summarizeDirectoryNodes(directoryNodes),
+    ]);
+
+    return [...otherNodes, ...summarizedFileNodes, ...summarizedDirectoryNodes];
+  }
+
+  /**
+   * Analyzes Git history and extracts commit information.
+   */
+  private async analyzeGitHistory(fileNodes: FileNode[], lastCommitHash: string | null): Promise<{
+    nodes: (import('../types').CommitNode | import('../types').PullRequestNode)[];
+    edges: Edge[];
+  }> {
+    const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
+    await gitAnalyzer.analyzeRepo(fileNodes, lastCommitHash);
+    
+    return {
+      nodes: gitAnalyzer.getNodes(),
+      edges: gitAnalyzer.getEdges(),
+    };
+  }
+
+  /**
+   * Generates vector embeddings for all nodes.
+   */
+  private async generateEmbeddings(nodes: any[]): Promise<NodeWithEmbedding[]> {
+    const embeddingService = new EmbeddingService(this.config);
+    await embeddingService.loadModel();
+    
+    return await embeddingService.embedNodes(nodes);
+  }
+
+  /**
+   * Persists data to the configured databases.
+   */
+  private async persistData(nodes: NodeWithEmbedding[], edges: Edge[]): Promise<void> {
+    const dbConfig = this.config.getDatabaseConfig();
+    const dataLoader = new DataLoader(
+      dbConfig.lancedb.path,
+      dbConfig.sqlite.path,
+      dbConfig.tinkergraph.url,
+      this.config
+    );
+    
+    await dataLoader.load(nodes, edges);
+  }
+
+  /**
+   * Updates the indexing state with the current commit hash.
+   */
+  private async updateIndexingState(currentCommitHash: string | null): Promise<void> {
+    if (currentCommitHash) {
+      const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
+      await gitAnalyzer.setLastIndexedCommit(currentCommitHash);
+    }
+  }
+
+  /**
+   * Creates the indexing result object.
+   */
+  private createResult(
+    startTime: number,
+    totalNodes: number,
+    totalEdges: number,
+    processedFiles: number,
+    isIncremental: boolean
+  ): IndexingResult {
+    return {
+      totalNodes,
+      totalEdges,
+      processedFiles,
+      isIncremental,
+      duration: Date.now() - startTime,
+      errors: [...this.errors],
+    };
+  }
+
+  /**
+   * Gets the current indexing statistics.
+   */
+  async getIndexingStats(): Promise<{
+    lastIndexedAt: Date | null;
+    lastCommitHash: string | null;
+    totalNodes: number;
+    totalEdges: number;
+  }> {
+    try {
+      const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
+      const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
+      
+      // TODO: Get actual stats from databases
+      return {
+        lastIndexedAt: null, // TODO: Implement
+        lastCommitHash,
+        totalNodes: 0, // TODO: Implement
+        totalEdges: 0, // TODO: Implement
+      };
+    } catch (error) {
+      this.logger.error('Failed to get indexing stats', { error: error.message });
+      throw error;
+    }
+  }
+}
