@@ -76,11 +76,27 @@ export class Logger {
   }
 
   /**
+   * Safely stringifies an object, handling circular references.
+   */
+  private safeStringify(obj: any): string {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular Reference]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+  }
+
+  /**
    * Formats a log entry for output.
    */
   private formatLogEntry(entry: LogEntry): string {
     const contextStr = entry.context ? `[${entry.context}] ` : '';
-    const metadataStr = entry.metadata ? ` ${JSON.stringify(entry.metadata)}` : '';
+    const metadataStr = entry.metadata ? ` ${this.safeStringify(entry.metadata)}` : '';
     return `${entry.timestamp} [${entry.level.toUpperCase()}] ${contextStr}${entry.message}${metadataStr}`;
   }
 

@@ -58,7 +58,7 @@ export class Indexer {
 
     try {
       // Phase 0: Initialize and determine indexing strategy
-      this.logger.debug('Phase 0: Determining indexing strategy...');
+      this.logger.info('Phase 0: Determining indexing strategy...');
       const indexingStrategy = await this.determineIndexingStrategy(options);
       this.logger.info('Indexing strategy determined', indexingStrategy);
 
@@ -129,16 +129,16 @@ export class Indexer {
     currentCommitHash: string | null;
     changedFiles: string[];
   }> {
-    this.logger.debug('Creating GitAnalyzer...');
+    this.logger.info('Creating GitAnalyzer...');
     const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
-    
+    this.logger.info('GitAnalyzer created successfully');
     try {
-      this.logger.debug('Getting current commit hash...');
+      this.logger.info('Getting current commit hash...');
       const currentCommitHash = await gitAnalyzer.getCurrentCommitHash();
-      this.logger.debug('Current commit hash retrieved', { currentCommitHash });
+      this.logger.info('Current commit hash retrieved', { currentCommitHash });
       
       if (options.forceFullIndex) {
-        this.logger.debug('Force full index requested');
+        this.logger.info('Force full index requested');
         return {
           isIncremental: false,
           lastCommitHash: null,
@@ -147,12 +147,12 @@ export class Indexer {
         };
       }
 
-      this.logger.debug('Getting last indexed commit...');
+      this.logger.info('Getting last indexed commit...');
       const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
-      this.logger.debug('Last indexed commit retrieved', { lastCommitHash });
+      this.logger.info('Last indexed commit retrieved', { lastCommitHash });
       
       if (!lastCommitHash || !currentCommitHash) {
-        this.logger.debug('No previous index found, using full indexing');
+        this.logger.info('No previous index found, using full indexing');
         return {
           isIncremental: false,
           lastCommitHash: null,
