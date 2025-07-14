@@ -9,6 +9,7 @@ import * as path from 'path';
 import { FileNode, DirectoryNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 // import { pipeline, env } from '@xenova/transformers'; // Example LLM integration
 
 /**
@@ -63,7 +64,7 @@ export class SummaryGenerator {
       this.logger.info('LLM loaded successfully');
       operation();
     } catch (error) {
-      this.logger.error('Failed to load LLM', { error: error.message });
+      this.logger.error('Failed to load LLM', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -100,7 +101,7 @@ export class SummaryGenerator {
         : summary;
         
     } catch (error) {
-      this.logger.warn('Failed to generate summary, using fallback', { error: error.message });
+      this.logger.warn('Failed to generate summary, using fallback', { error: getErrorMessage(error) });
       return `Summary unavailable: ${text.substring(0, 100)}...`;
     }
   }
@@ -147,7 +148,7 @@ export class SummaryGenerator {
       const content = await fs.promises.readFile(filePath, 'utf-8');
       return content;
     } catch (error) {
-      this.logger.warn(`Failed to read file: ${filePath}`, { error: error.message });
+      this.logger.warn(`Failed to read file: ${filePath}`, { error: getErrorMessage(error) });
       return `Unable to read file content: ${path.basename(filePath)}`;
     }
   }
@@ -187,7 +188,7 @@ export class SummaryGenerator {
       
       return info;
     } catch (error) {
-      this.logger.warn(`Failed to gather directory info: ${dirPath}`, { error: error.message });
+      this.logger.warn(`Failed to gather directory info: ${dirPath}`, { error: getErrorMessage(error) });
       return `Directory information unavailable: ${path.basename(dirPath)}`;
     }
   }
@@ -232,13 +233,13 @@ export class SummaryGenerator {
           this.logger.debug(`Generated summary for file: ${node.properties.fileName}`);
           
         } catch (error) {
-          this.logger.warn(`Failed to summarize file: ${node.properties.fileName}`, { error: error.message });
+          this.logger.warn(`Failed to summarize file: ${node.properties.fileName}`, { error: getErrorMessage(error) });
           // Add node without summary
           summarizedNodes.push({
             ...node,
             properties: {
               ...node.properties,
-              aiSummary: `Summary generation failed: ${error.message}`,
+              aiSummary: `Summary generation failed: ${getErrorMessage(error)}`,
             },
           });
         }
@@ -253,7 +254,7 @@ export class SummaryGenerator {
       return summarizedNodes;
       
     } catch (error) {
-      this.logger.error('File summarization failed', { error: error.message });
+      this.logger.error('File summarization failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -299,13 +300,13 @@ export class SummaryGenerator {
           this.logger.debug(`Generated summary for directory: ${node.properties.dirName}`);
           
         } catch (error) {
-          this.logger.warn(`Failed to summarize directory: ${node.properties.dirName}`, { error: error.message });
+          this.logger.warn(`Failed to summarize directory: ${node.properties.dirName}`, { error: getErrorMessage(error) });
           // Add node without summary
           summarizedNodes.push({
             ...node,
             properties: {
               ...node.properties,
-              aiSummary: `Summary generation failed: ${error.message}`,
+              aiSummary: `Summary generation failed: ${getErrorMessage(error)}`,
             },
           });
         }
@@ -320,7 +321,7 @@ export class SummaryGenerator {
       return summarizedNodes;
       
     } catch (error) {
-      this.logger.error('Directory summarization failed', { error: error.message });
+      this.logger.error('Directory summarization failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }

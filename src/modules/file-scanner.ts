@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
+import { getErrorMessage } from '../utils/error-handling';
 
 /**
  * Manages file discovery within a given project.
@@ -51,7 +52,7 @@ export class FileScanner {
         );
       } catch (error) {
         this.logger.warn('Failed to read .gitignore file', {
-          error: error.message,
+          error: getErrorMessage(error),
         });
       }
     }
@@ -85,7 +86,7 @@ export class FileScanner {
         filteredFiles.push(file);
       } catch (error) {
         this.logger.warn(`Skipping inaccessible file: ${file}`, {
-          error: error.message,
+          error: getErrorMessage(error),
         });
       }
     }
@@ -142,7 +143,7 @@ export class FileScanner {
       operation();
       return filteredFiles;
     } catch (error) {
-      this.logger.error('File discovery failed', { error: error.message });
+      this.logger.error('File discovery failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -172,7 +173,7 @@ export class FileScanner {
         filesByExtension[ext] = (filesByExtension[ext] || 0) + 1;
       } catch (error) {
         this.logger.warn(`Failed to get stats for file: ${file}`, {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }

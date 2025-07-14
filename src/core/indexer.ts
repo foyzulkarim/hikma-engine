@@ -13,6 +13,7 @@ import { DataLoader } from '../modules/data-loader';
 import { NodeWithEmbedding, Edge, FileNode, DirectoryNode } from '../types';
 import { ConfigManager } from '../config';
 import { Logger, getLogger } from '../utils/logger';
+import { getErrorMessage, logError } from '../utils/error-handling';
 
 export interface IndexingResult {
   totalNodes: number;
@@ -57,10 +58,12 @@ export class Indexer {
 
     try {
       // Phase 0: Initialize and determine indexing strategy
+      this.logger.debug('Phase 0: Determining indexing strategy...');
       const indexingStrategy = await this.determineIndexingStrategy(options);
       this.logger.info('Indexing strategy determined', indexingStrategy);
 
       // Phase 1: File Discovery
+      this.logger.debug('Phase 1: Starting file discovery...');
       const filesToProcess = await this.discoverFiles(indexingStrategy);
       this.logger.info(`Discovered ${filesToProcess.length} files to process`);
 
@@ -111,8 +114,8 @@ export class Indexer {
       return result;
 
     } catch (error) {
-      this.logger.error('Indexing pipeline failed', { error: error.message });
-      this.errors.push(error.message);
+      logError(this.logger, 'Indexing pipeline failed', error);
+      this.errors.push(getErrorMessage(error));
       throw error;
     }
   }
@@ -126,12 +129,16 @@ export class Indexer {
     currentCommitHash: string | null;
     changedFiles: string[];
   }> {
+    this.logger.debug('Creating GitAnalyzer...');
     const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
     
     try {
+      this.logger.debug('Getting current commit hash...');
       const currentCommitHash = await gitAnalyzer.getCurrentCommitHash();
+      this.logger.debug('Current commit hash retrieved', { currentCommitHash });
       
       if (options.forceFullIndex) {
+        this.logger.debug('Force full index requested');
         return {
           isIncremental: false,
           lastCommitHash: null,
@@ -140,9 +147,12 @@ export class Indexer {
         };
       }
 
+      this.logger.debug('Getting last indexed commit...');
       const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
+      this.logger.debug('Last indexed commit retrieved', { lastCommitHash });
       
       if (!lastCommitHash || !currentCommitHash) {
+        this.logger.debug('No previous index found, using full indexing');
         return {
           isIncremental: false,
           lastCommitHash: null,
@@ -170,7 +180,7 @@ export class Indexer {
         changedFiles,
       };
     } catch (error) {
-      this.logger.warn('Failed to determine incremental strategy, falling back to full index', { error: error.message });
+      this.logger.warn('Failed to determine incremental strategy, falling back to full index', { error: getErrorMessage(error) });
       return {
         isIncremental: false,
         lastCommitHash: null,
@@ -320,7 +330,7 @@ export class Indexer {
         totalEdges: 0, // TODO: Implement
       };
     } catch (error) {
-      this.logger.error('Failed to get indexing stats', { error: error.message });
+      logError(this.logger, 'Failed to get indexing stats', error);
       throw error;
     }
   }

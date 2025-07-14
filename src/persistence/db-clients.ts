@@ -3,10 +3,14 @@
  *       This includes LanceDB for vector storage, Better-SQLite3 for relational metadata, and Gremlin for graph traversal.
  */
 
-// import { open } from '@lancedb/lancedb';
-import Database from 'better-sqlite3';
+import * as lancedb from '@lancedb/lancedb';
+import Database, { Database as DatabaseType } from 'better-sqlite3';
 import { getLogger } from '../utils/logger';
-// import { DriverRemoteConnection, GraphTraversalSource } from 'gremlin';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
+// Mock Gremlin imports for now since we're using mock implementation
+const DriverRemoteConnection = null;
+const GraphTraversalSource = null;
+const Graph = null;
 
 /**
  * Client for LanceDB (Vector Database).
@@ -22,7 +26,6 @@ export class LanceDBClient {
    */
   constructor(private path: string) {
     this.logger.info(`Initializing LanceDB client`, { path });
-    // TODO: In a real scenario, you would open the database here: this.db = await open(path);
   }
 
   /**
@@ -36,13 +39,11 @@ export class LanceDBClient {
 
     try {
       this.logger.info('Connecting to LanceDB');
-      // TODO: Simulate or establish connection
-      // this.db = await open(this.path);
-      this.db = { /* mock LanceDB instance */ };
+      this.db = await lancedb.connect(this.path);
       this.isConnected = true;
       this.logger.info('Connected to LanceDB successfully');
     } catch (error) {
-      this.logger.error('Failed to connect to LanceDB', { error: error.message });
+      this.logger.error('Failed to connect to LanceDB', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -58,12 +59,13 @@ export class LanceDBClient {
 
     try {
       this.logger.info('Disconnecting from LanceDB');
-      // TODO: Simulate or close connection
-      this.db = null;
+      if (this.db && this.db.close) {
+        await this.db.close();
+      }
       this.isConnected = false;
       this.logger.info('Disconnected from LanceDB successfully');
     } catch (error) {
-      this.logger.error('Failed to disconnect from LanceDB', { error: error.message });
+      this.logger.error('Failed to disconnect from LanceDB', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -73,18 +75,13 @@ export class LanceDBClient {
    * @param {string} tableName - The name of the table to retrieve.
    * @returns {any} A mock or actual LanceDB table object.
    */
-  getTable(tableName: string): any {
+  async getTable(tableName: string): Promise<any> {
     if (!this.isConnected) {
       throw new Error('Not connected to LanceDB. Call connect() first.');
     }
 
     this.logger.debug(`Getting LanceDB table: ${tableName}`);
-    // TODO: Implement actual table retrieval
-    return { 
-      name: tableName,
-      insert: (data: any[]) => this.logger.debug(`Mock insert to ${tableName}`, { count: data.length }),
-      search: (query: any) => this.logger.debug(`Mock search in ${tableName}`, { query }),
-    };
+    return await this.db.table(tableName);
   }
 
   /**
@@ -100,12 +97,11 @@ export class LanceDBClient {
 
     try {
       this.logger.info(`Creating LanceDB table: ${tableName}`);
-      // TODO: Implement actual table creation
-      const table = this.getTable(tableName);
+      const table = await this.db.createTable(tableName, schema);
       this.logger.info(`LanceDB table created successfully: ${tableName}`);
       return table;
     } catch (error) {
-      this.logger.error(`Failed to create LanceDB table: ${tableName}`, { error: error.message });
+      this.logger.error(`Failed to create LanceDB table: ${tableName}`, { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -122,7 +118,7 @@ export class LanceDBClient {
  * Client for SQLite (Relational Database).
  */
 export class SQLiteClient {
-  private db: Database.Database;
+  private db: DatabaseType;
   private logger = getLogger('SQLiteClient');
   private isConnected = false;
 
@@ -152,7 +148,7 @@ export class SQLiteClient {
       this.isConnected = true;
       this.logger.info('Connected to SQLite successfully');
     } catch (error) {
-      this.logger.error('Failed to connect to SQLite', { error: error.message });
+      this.logger.error('Failed to connect to SQLite', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -172,7 +168,7 @@ export class SQLiteClient {
       this.isConnected = false;
       this.logger.info('Disconnected from SQLite successfully');
     } catch (error) {
-      this.logger.error('Failed to disconnect from SQLite', { error: error.message });
+      this.logger.error('Failed to disconnect from SQLite', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -281,15 +277,16 @@ export class SQLiteClient {
    * Executes a SQL query.
    * @param {string} sql - The SQL query string.
    * @param {any[]} [params] - Optional parameters for the SQL query.
-   * @returns {Database.RunResult} The result of the SQL execution.
+   * @returns {any} The result of the SQL execution.
    */
-  run(sql: string, params?: any[]): Database.RunResult {
+  run(sql: string, params?: any[]): any {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
     }
 
     this.logger.debug(`Executing SQLite query`, { sql: sql.substring(0, 100) });
-    return this.db.run(sql, params);
+    const stmt = this.db.prepare(sql);
+    return params ? stmt.run(...params) : stmt.run();
   }
 
   /**
@@ -348,7 +345,7 @@ export class SQLiteClient {
       );
       return result?.value || null;
     } catch (error) {
-      this.logger.warn('Failed to get last indexed commit', { error: error.message });
+      this.logger.warn('Failed to get last indexed commit', { error: getErrorMessage(error) });
       return null;
     }
   }
@@ -366,7 +363,7 @@ export class SQLiteClient {
       );
       this.logger.debug('Set last indexed commit', { commitHash });
     } catch (error) {
-      this.logger.error('Failed to set last indexed commit', { error: error.message });
+      this.logger.error('Failed to set last indexed commit', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -394,7 +391,7 @@ export class SQLiteClient {
         lastIndexed,
       };
     } catch (error) {
-      this.logger.error('Failed to get indexing stats', { error: error.message });
+      this.logger.error('Failed to get indexing stats', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -422,9 +419,6 @@ export class TinkerGraphClient {
    */
   constructor(private url: string) {
     this.logger.info(`Initializing TinkerGraph client`, { url });
-    // TODO: In a real scenario, you would establish connection here:
-    // this.connection = new DriverRemoteConnection(url);
-    // this.g = new GraphTraversalSource(new Graph(), this.connection);
   }
 
   /**
@@ -437,17 +431,34 @@ export class TinkerGraphClient {
     }
 
     try {
-      this.logger.info('Connecting to TinkerGraph');
-      // TODO: Simulate or establish connection
-      this.connection = { 
-        close: () => this.logger.debug('Mock TinkerGraph connection closed'),
-        isOpen: () => true,
+      this.logger.info('Connecting to TinkerGraph (mock mode)');
+      // Mock implementation for development - no actual server required
+      this.connection = { close: async () => {} };
+      this.g = {
+        addV: (label: string) => ({
+          property: (key: string, value: any) => ({
+            property: (key: string, value: any) => ({ next: async () => ({ value: { id: `mock-${Date.now()}` } }) }),
+            next: async () => ({ value: { id: `mock-${Date.now()}` } })
+          }),
+          next: async () => ({ value: { id: `mock-${Date.now()}` } })
+        }),
+        V: (id: string) => ({
+          next: async () => ({ value: { id } }),
+          addE: (label: string) => ({
+            to: (target: any) => ({
+              property: (key: string, value: any) => ({
+                property: (key: string, value: any) => ({ next: async () => ({ value: { id: `mock-edge-${Date.now()}` } }) }),
+                next: async () => ({ value: { id: `mock-edge-${Date.now()}` } })
+              }),
+              next: async () => ({ value: { id: `mock-edge-${Date.now()}` } })
+            })
+          })
+        })
       };
-      this.g = { /* mock GraphTraversalSource */ };
       this.isConnected = true;
-      this.logger.info('Connected to TinkerGraph successfully');
+      this.logger.info('Connected to TinkerGraph successfully (mock mode)');
     } catch (error) {
-      this.logger.error('Failed to connect to TinkerGraph', { error: error.message });
+      this.logger.error('Failed to connect to TinkerGraph', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -472,7 +483,7 @@ export class TinkerGraphClient {
       this.isConnected = false;
       this.logger.info('Disconnected from TinkerGraph successfully');
     } catch (error) {
-      this.logger.error('Failed to disconnect from TinkerGraph', { error: error.message });
+      this.logger.error('Failed to disconnect from TinkerGraph', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -504,11 +515,14 @@ export class TinkerGraphClient {
 
     try {
       this.logger.debug(`Adding vertex: ${label}`, { properties });
-      // TODO: Implement actual vertex addition
-      // const vertex = await this.g.addV(label).property(...).next();
-      return { label, properties, id: `mock-vertex-${Date.now()}` };
+      let traversal = this.g.addV(label);
+      for (const key in properties) {
+        traversal = traversal.property(key, properties[key]);
+      }
+      const vertex = await traversal.next();
+      return vertex.value;
     } catch (error) {
-      this.logger.error(`Failed to add vertex: ${label}`, { error: error.message });
+      this.logger.error(`Failed to add vertex: ${label}`, { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -533,10 +547,21 @@ export class TinkerGraphClient {
 
     try {
       this.logger.debug(`Adding edge: ${fromVertexId} -[${label}]-> ${toVertexId}`, { properties });
-      // TODO: Implement actual edge addition
-      return { fromVertexId, toVertexId, label, properties, id: `mock-edge-${Date.now()}` };
+      const fromV = await this.g.V(fromVertexId).next();
+      const toV = await this.g.V(toVertexId).next();
+
+      if (!fromV.value || !toV.value) {
+        throw new Error(`One or both vertices not found: fromVertexId=${fromVertexId}, toVertexId=${toVertexId}`);
+      }
+
+      let traversal = this.g.V(fromVertexId).addE(label).to(this.g.V(toVertexId));
+      for (const key in properties) {
+        traversal = traversal.property(key, properties[key]);
+      }
+      const edge = await traversal.next();
+      return edge.value;
     } catch (error) {
-      this.logger.error(`Failed to add edge: ${label}`, { error: error.message });
+      this.logger.error(`Failed to add edge: ${label}`, { error: getErrorMessage(error) });
       throw error;
     }
   }

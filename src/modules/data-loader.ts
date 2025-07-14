@@ -7,6 +7,7 @@ import { NodeWithEmbedding, Edge, FileNode, DirectoryNode, CodeNode, CommitNode,
 import { LanceDBClient, SQLiteClient, TinkerGraphClient } from '../persistence/db-clients';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 
 /**
  * Loads processed data into the various database systems.
@@ -66,7 +67,7 @@ export class DataLoader {
       this.logger.info('Connected to all databases successfully');
       operation();
     } catch (error) {
-      this.logger.error('Failed to connect to databases', { error: error.message });
+      this.logger.error('Failed to connect to databases', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -91,7 +92,7 @@ export class DataLoader {
       this.logger.info('Disconnected from all databases successfully');
       operation();
     } catch (error) {
-      this.logger.error('Failed to disconnect from databases', { error: error.message });
+      this.logger.error('Failed to disconnect from databases', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -125,18 +126,36 @@ export class DataLoader {
         
         // Create or get table for this node type
         const tableName = `${nodeType.toLowerCase()}s`;
-        const table = await this.lancedbClient.createTable(tableName, vectorData);
         
-        // Insert data (mock implementation)
-        table.insert(vectorData);
-        
-        this.logger.debug(`Loaded ${typeNodes.length} ${nodeType} nodes to LanceDB table: ${tableName}`);
+        try {
+          // Try to get existing table first
+          let table;
+          try {
+            table = await this.lancedbClient.getTable(tableName);
+            this.logger.debug(`Using existing LanceDB table: ${tableName}`);
+          } catch (error) {
+            // Table doesn't exist, create it
+            table = await this.lancedbClient.createTable(tableName, vectorData);
+            this.logger.debug(`Created new LanceDB table: ${tableName}`);
+          }
+          
+          // Insert data (LanceDB handles batch inserts)
+          if (table && table.add) {
+            await table.add(vectorData);
+          } else {
+            this.logger.warn(`LanceDB table ${tableName} doesn't support add operation (mock mode)`);
+          }
+          
+          this.logger.debug(`Loaded ${typeNodes.length} ${nodeType} nodes to LanceDB table: ${tableName}`);
+        } catch (tableError) {
+          this.logger.warn(`Failed to load ${nodeType} nodes to LanceDB`, { error: getErrorMessage(tableError) });
+        }
       }
       
       this.logger.info('LanceDB batch load completed successfully');
       operation();
     } catch (error) {
-      this.logger.error('LanceDB batch load failed', { error: error.message });
+      this.logger.error('LanceDB batch load failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -164,7 +183,7 @@ export class DataLoader {
           });
           vertexMap.set(node.id, vertex);
         } catch (error) {
-          this.logger.warn(`Failed to add vertex: ${node.id}`, { error: error.message });
+          this.logger.warn(`Failed to add vertex: ${node.id}`, { error: getErrorMessage(error) });
         }
       }
       
@@ -190,7 +209,7 @@ export class DataLoader {
             });
           }
         } catch (error) {
-          this.logger.warn(`Failed to add edge: ${edge.type}`, { error: error.message });
+          this.logger.warn(`Failed to add edge: ${edge.type}`, { error: getErrorMessage(error) });
         }
       }
       
@@ -202,7 +221,7 @@ export class DataLoader {
       
       operation();
     } catch (error) {
-      this.logger.error('TinkerGraph batch load failed', { error: error.message });
+      this.logger.error('TinkerGraph batch load failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -232,22 +251,22 @@ export class DataLoader {
         
         switch (nodeType) {
           case 'FileNode':
-            await this.insertFileNodes(typeNodes as FileNode[], statements.files);
+            await this.insertFileNodes(typeNodes as unknown as FileNode[], statements.files);
             break;
           case 'DirectoryNode':
-            await this.insertDirectoryNodes(typeNodes as DirectoryNode[], statements.directories);
+            await this.insertDirectoryNodes(typeNodes as unknown as DirectoryNode[], statements.directories);
             break;
           case 'CodeNode':
-            await this.insertCodeNodes(typeNodes as CodeNode[], statements.codeNodes);
+            await this.insertCodeNodes(typeNodes as unknown as CodeNode[], statements.codeNodes);
             break;
           case 'CommitNode':
-            await this.insertCommitNodes(typeNodes as CommitNode[], statements.commits);
+            await this.insertCommitNodes(typeNodes as unknown as CommitNode[], statements.commits);
             break;
           case 'TestNode':
-            await this.insertTestNodes(typeNodes as TestNode[], statements.testNodes);
+            await this.insertTestNodes(typeNodes as unknown as TestNode[], statements.testNodes);
             break;
           case 'PullRequestNode':
-            await this.insertPullRequestNodes(typeNodes as PullRequestNode[], statements.pullRequests);
+            await this.insertPullRequestNodes(typeNodes as unknown as PullRequestNode[], statements.pullRequests);
             break;
           default:
             this.logger.warn(`Unknown node type for SQLite insertion: ${nodeType}`);
@@ -257,7 +276,7 @@ export class DataLoader {
       this.logger.info('SQLite batch load completed successfully');
       operation();
     } catch (error) {
-      this.logger.error('SQLite batch load failed', { error: error.message });
+      this.logger.error('SQLite batch load failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -288,24 +307,24 @@ export class DataLoader {
   private prepareSQLiteStatements(): Record<string, any> {
     return {
       files: this.sqliteClient.prepare(`
-        INSERT OR REPLACE INTO files (id, file_path, file_name, file_extension, ai_summary, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT OR REPLACE INTO files (id, file_path, file_name, file_extension, ai_summary)
+        VALUES (?, ?, ?, ?, ?)
       `),
       directories: this.sqliteClient.prepare(`
-        INSERT OR REPLACE INTO directories (id, dir_path, dir_name, ai_summary, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT OR REPLACE INTO directories (id, dir_path, dir_name, ai_summary)
+        VALUES (?, ?, ?, ?)
       `),
       codeNodes: this.sqliteClient.prepare(`
-        INSERT OR REPLACE INTO code_nodes (id, name, signature, language, file_path, start_line, end_line, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT OR REPLACE INTO code_nodes (id, name, signature, language, file_path, start_line, end_line)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `),
       commits: this.sqliteClient.prepare(`
         INSERT OR REPLACE INTO commits (id, hash, author, date, message, diff_summary)
         VALUES (?, ?, ?, ?, ?, ?)
       `),
       testNodes: this.sqliteClient.prepare(`
-        INSERT OR REPLACE INTO test_nodes (id, name, file_path, start_line, end_line, framework, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT OR REPLACE INTO test_nodes (id, name, file_path, start_line, end_line, framework)
+        VALUES (?, ?, ?, ?, ?, ?)
       `),
       pullRequests: this.sqliteClient.prepare(`
         INSERT OR REPLACE INTO pull_requests (id, pr_id, title, author, created_at_pr, merged_at, url, body)
@@ -328,7 +347,7 @@ export class DataLoader {
           node.properties.aiSummary || null
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert FileNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert FileNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -346,7 +365,7 @@ export class DataLoader {
           node.properties.aiSummary || null
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert DirectoryNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert DirectoryNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -367,7 +386,7 @@ export class DataLoader {
           node.properties.endLine
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert CodeNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert CodeNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -387,7 +406,7 @@ export class DataLoader {
           node.properties.diffSummary || null
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert CommitNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert CommitNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -407,7 +426,7 @@ export class DataLoader {
           node.properties.framework || null
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert TestNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert TestNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -429,7 +448,7 @@ export class DataLoader {
           node.properties.body || null
         );
       } catch (error) {
-        this.logger.warn(`Failed to insert PullRequestNode: ${node.id}`, { error: error.message });
+        this.logger.warn(`Failed to insert PullRequestNode: ${node.id}`, { error: getErrorMessage(error) });
       }
     }
   }
@@ -462,7 +481,7 @@ export class DataLoader {
       this.logger.info('Polyglot data loading completed successfully');
       operation();
     } catch (error) {
-      this.logger.error('Polyglot data loading failed', { error: error.message });
+      this.logger.error('Polyglot data loading failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     } finally {
@@ -470,7 +489,7 @@ export class DataLoader {
       try {
         await this.disconnectFromDatabases();
       } catch (disconnectError) {
-        this.logger.warn('Failed to disconnect from some databases', { error: disconnectError.message });
+        this.logger.warn('Failed to disconnect from some databases', { error: getErrorMessage(disconnectError) });
       }
     }
   }
@@ -514,7 +533,7 @@ export class DataLoader {
         lastLoad,
       };
     } catch (error) {
-      this.logger.error('Failed to get DataLoader stats', { error: error.message });
+      this.logger.error('Failed to get DataLoader stats', { error: getErrorMessage(error) });
       throw error;
     }
   }

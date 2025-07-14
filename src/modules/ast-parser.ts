@@ -10,6 +10,7 @@ import * as path from 'path';
 import { CodeNode, FileNode, DirectoryNode, Edge, TestNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 
 /**
  * Parses source code files to extract structured data for the knowledge graph.
@@ -170,7 +171,7 @@ export class AstParser {
 
       visit(sourceFile);
     } catch (error) {
-      this.logger.warn(`Failed to parse TypeScript file: ${filePath}`, { error: error.message });
+      this.logger.warn(`Failed to parse TypeScript file: ${filePath}`, { error: getErrorMessage(error) });
     }
   }
 
@@ -421,7 +422,7 @@ export class AstParser {
               break;
           }
         } catch (error) {
-          this.logger.warn(`Failed to parse file: ${filePath}`, { error: error.message });
+          this.logger.warn(`Failed to parse file: ${filePath}`, { error: getErrorMessage(error) });
         }
       }
       
@@ -436,7 +437,7 @@ export class AstParser {
       
       operation();
     } catch (error) {
-      this.logger.error('AST parsing failed', { error: error.message });
+      this.logger.error('AST parsing failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }

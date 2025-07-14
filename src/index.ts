@@ -3,10 +3,22 @@
  *       Initializes configuration, logging, and delegates to the core indexer.
  */
 
+// Add global error handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
 import * as path from 'path';
 import { Indexer, IndexingOptions } from './core/indexer';
 import { initializeConfig } from './config';
 import { initializeLogger, getLogger } from './utils/logger';
+import { getErrorMessage, getErrorStack, logError } from './utils/error-handling';
 
 /**
  * Command line interface for the hikma-engine.
@@ -105,15 +117,20 @@ Examples:
       });
 
       const logger = getLogger('CLI');
+      console.log('✓ Logger initialized');
+      
       logger.info('Starting hikma-engine', { 
         projectRoot: this.projectRoot,
         options,
-        version: require('../../package.json').version 
+        version: require('../package.json').version 
       });
 
       // Create and run the indexer
+      console.log('✓ Creating indexer...');
       const indexer = new Indexer(this.projectRoot, config);
+      console.log('✓ Indexer created, starting run...');
       const result = await indexer.run(options);
+      console.log('✓ Indexing completed');
 
       // Log results
       logger.info('Indexing completed successfully', result);
@@ -137,14 +154,17 @@ Examples:
 
     } catch (error) {
       const logger = getLogger('CLI');
-      logger.error('Application failed', { error: error.message, stack: error.stack });
+      logError(logger, 'Application failed', error);
       
       console.error('\n=== Error ===');
-      console.error(`Failed to index project: ${error.message}`);
+      console.error(`Failed to index project: ${getErrorMessage(error)}`);
       
       if (process.env.NODE_ENV === 'development') {
-        console.error('\nStack trace:');
-        console.error(error.stack);
+        const stack = getErrorStack(error);
+        if (stack) {
+          console.error('\nStack trace:');
+          console.error(stack);
+        }
       }
       
       process.exit(1);
@@ -169,7 +189,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   const logger = getLogger('Process');
-  logger.error('Uncaught exception', { error: error.message, stack: error.stack });
+  logger.error('Uncaught exception', { error: getErrorMessage(error), stack: getErrorStack(error) });
   process.exit(1);
 });
 

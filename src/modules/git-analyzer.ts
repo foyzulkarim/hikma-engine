@@ -10,6 +10,7 @@ import { CommitNode, PullRequestNode, Edge, FileNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { SQLiteClient } from '../persistence/db-clients';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 
 /**
  * Analyzes Git repository history and extracts commit-related information.
@@ -61,7 +62,7 @@ export class GitAnalyzer {
       const log = await this.git.log(['-1']);
       return log.latest?.hash || null;
     } catch (error) {
-      this.logger.warn('Failed to get current commit hash', { error: error.message });
+      this.logger.warn('Failed to get current commit hash', { error: getErrorMessage(error) });
       return null;
     }
   }
@@ -77,7 +78,7 @@ export class GitAnalyzer {
       this.sqliteClient.disconnect();
       return result;
     } catch (error) {
-      this.logger.warn('Failed to get last indexed commit', { error: error.message });
+      this.logger.warn('Failed to get last indexed commit', { error: getErrorMessage(error) });
       return null;
     }
   }
@@ -94,7 +95,7 @@ export class GitAnalyzer {
       this.sqliteClient.disconnect();
       this.logger.debug('Updated last indexed commit', { commitHash });
     } catch (error) {
-      this.logger.error('Failed to set last indexed commit', { error: error.message });
+      this.logger.error('Failed to set last indexed commit', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -122,7 +123,7 @@ export class GitAnalyzer {
       return changedFiles;
     } catch (error) {
       this.logger.error('Failed to get changed files', { 
-        error: error.message, 
+        error: getErrorMessage(error), 
         fromCommit, 
         toCommit 
       });
@@ -184,7 +185,7 @@ export class GitAnalyzer {
         this.nodes.push(commitNode);
       }
     } catch (error) {
-      this.logger.error('Failed to extract commits', { error: error.message });
+      this.logger.error('Failed to extract commits', { error: getErrorMessage(error) });
       throw error;
     }
   }
@@ -196,10 +197,10 @@ export class GitAnalyzer {
    */
   private async getCommitDiffSummary(commitHash: string): Promise<string> {
     try {
-      const diffStat = await this.git.show([commitHash, '--stat', '--format=""']);
+      const diffStat = await this.git.show([commitHash, '--stat', '--format=']);
       return diffStat.trim();
     } catch (error) {
-      this.logger.warn(`Failed to get diff summary for commit ${commitHash}`, { error: error.message });
+      this.logger.warn(`Failed to get diff summary for commit ${commitHash}`, { error: getErrorMessage(error) });
       return 'Unable to generate diff summary';
     }
   }
@@ -216,7 +217,7 @@ export class GitAnalyzer {
       for (const commitNode of this.nodes.filter(n => n.type === 'CommitNode') as CommitNode[]) {
         try {
           // Get files modified in this commit
-          const diff = await this.git.show([commitNode.properties.hash, '--name-only', '--format=""']);
+          const diff = await this.git.show([commitNode.properties.hash, '--name-only', '--format=']);
           const modifiedFiles = diff
             .split('\n')
             .filter(line => line.trim() !== '')
@@ -244,13 +245,13 @@ export class GitAnalyzer {
             }
           }
         } catch (error) {
-          this.logger.warn(`Failed to process commit ${commitNode.properties.hash}`, { error: error.message });
+          this.logger.warn(`Failed to process commit ${commitNode.properties.hash}`, { error: getErrorMessage(error) });
         }
       }
       
       operation();
     } catch (error) {
-      this.logger.error('Failed to create commit-file edges', { error: error.message });
+      this.logger.error('Failed to create commit-file edges', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -353,7 +354,7 @@ export class GitAnalyzer {
 
       operation();
     } catch (error) {
-      this.logger.error('Git analysis failed', { error: error.message });
+      this.logger.error('Git analysis failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -393,7 +394,7 @@ export class GitAnalyzer {
         latestCommit,
       };
     } catch (error) {
-      this.logger.error('Failed to get repository stats', { error: error.message });
+      this.logger.error('Failed to get repository stats', { error: getErrorMessage(error) });
       throw error;
     }
   }

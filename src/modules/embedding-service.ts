@@ -6,6 +6,7 @@
 import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, DirectoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
+import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 // import { pipeline, env } from '@xenova/transformers';
 
 /**
@@ -60,7 +61,7 @@ export class EmbeddingService {
       this.logger.info('Embedding model loaded successfully');
       operation();
     } catch (error) {
-      this.logger.error('Failed to load embedding model', { error: error.message });
+      this.logger.error('Failed to load embedding model', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
@@ -169,7 +170,7 @@ export class EmbeddingService {
       return embedding.map(val => val / magnitude);
       
     } catch (error) {
-      this.logger.warn('Failed to generate embedding, using zero vector', { error: error.message });
+      this.logger.warn('Failed to generate embedding, using zero vector', { error: getErrorMessage(error) });
       const dimensions = this.model?.dimensions || 384;
       return new Array(dimensions).fill(0);
     }
@@ -255,7 +256,7 @@ export class EmbeddingService {
       return validEmbeddings;
       
     } catch (error) {
-      this.logger.error('Embedding generation failed', { error: error.message });
+      this.logger.error('Embedding generation failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
