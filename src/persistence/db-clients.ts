@@ -81,7 +81,13 @@ export class LanceDBClient {
     }
 
     this.logger.debug(`Getting LanceDB table: ${tableName}`);
-    return await this.db.table(tableName);
+    try {
+      return await this.db.openTable(tableName);
+    } catch (error) {
+      // If table doesn't exist, return null
+      this.logger.warn(`Table ${tableName} does not exist`, { error: getErrorMessage(error) });
+      return null;
+    }
   }
 
   /**
@@ -379,9 +385,9 @@ export class SQLiteClient {
     lastIndexed: string | null;
   }> {
     try {
-      const fileCount = this.get('SELECT COUNT(*) as count FROM files')?.count || 0;
-      const dirCount = this.get('SELECT COUNT(*) as count FROM directories')?.count || 0;
-      const commitCount = this.get('SELECT COUNT(*) as count FROM commits')?.count || 0;
+      const fileCount = (this.db.prepare('SELECT COUNT(*) as count FROM files').get() as { count: number } | undefined)?.count || 0;
+      const dirCount = (this.db.prepare('SELECT COUNT(*) as count FROM directories').get() as { count: number } | undefined)?.count || 0;
+      const commitCount = (this.db.prepare('SELECT COUNT(*) as count FROM commits').get() as { count: number } | undefined)?.count || 0;
       const lastIndexed = this.getLastIndexedCommit();
 
       return {
