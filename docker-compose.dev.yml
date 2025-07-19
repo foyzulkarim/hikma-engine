@@ -1,0 +1,36 @@
+version: '3.8'
+
+# Development override for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  hikma-api:
+    build:
+      target: builder  # Use builder stage for development
+    environment:
+      - NODE_ENV=development
+      - HIKMA_API_LOG_LEVEL=debug
+      - HIKMA_API_LOG_FORMAT=text
+      - HIKMA_API_CORS_ORIGINS=*
+      - HIKMA_API_RATE_LIMIT_ENABLED=false  # Disable rate limiting in dev
+      - HIKMA_API_KEY_ENABLED=false  # Disable API key auth in dev
+      - HIKMA_API_JWT_ENABLED=false  # Disable JWT auth in dev
+    volumes:
+      - ./src:/app/src:ro  # Mount source code for hot reload
+      - ./package.json:/app/package.json:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - hikma-dev-data:/app/data
+    command: ["npm", "run", "dev"]  # Use development command
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Debug port
+    
+  tinkergraph:
+    ports:
+      - "8182:8182"  # Expose Gremlin port for development tools
+    environment:
+      - JAVA_OPTIONS=-Xms256m -Xmx512m  # Reduce memory for development
+
+volumes:
+  hikma-dev-data:
+    driver: local

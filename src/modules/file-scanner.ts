@@ -10,6 +10,7 @@ import * as path from 'path';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
+import * as crypto from 'crypto';
 
 /**
  * Manages file discovery within a given project.
@@ -97,7 +98,7 @@ export class FileScanner {
   async findAllFiles(
     patterns: string[],
     changedFiles?: string[]
-  ): Promise<string[]> {
+  ): Promise<FileMetadata[]> {
     const operation = this.logger.operation('File discovery');
 
     try {
@@ -133,6 +134,8 @@ export class FileScanner {
 
       // Apply additional filters (size, accessibility, etc.)
       const filteredFiles = await this.filterFiles(files);
+      const metadataPromises = filteredFiles.map(filePath => this.getFileMetadata(filePath));
+      const metadata = await Promise.all(metadataPromises);
 
       this.logger.info(`File discovery completed`, {
         totalFound: files.length,
@@ -141,7 +144,7 @@ export class FileScanner {
       });
 
       operation();
-      return filteredFiles;
+      return metadata;
     } catch (error) {
       this.logger.error('File discovery failed', { error: getErrorMessage(error) });
       operation();
@@ -166,13 +169,13 @@ export class FileScanner {
 
     for (const file of files) {
       try {
-        const stats = await fs.promises.stat(file);
-        totalSize += stats.size;
+        // Convert sizeKb back to bytes for totalSize calculation
+        totalSize += file.sizeKb * 1024;
 
-        const ext = path.extname(file).toLowerCase();
+        const ext = file.extension ? `.${file.extension}` : '';
         filesByExtension[ext] = (filesByExtension[ext] || 0) + 1;
       } catch (error) {
-        this.logger.warn(`Failed to get stats for file: ${file}`, {
+        this.logger.warn(`Failed to get stats for file: ${file.path}`, {
           error: getErrorMessage(error),
         });
       }
@@ -184,4 +187,71 @@ export class FileScanner {
       filesByExtension,
     };
   }
+
+  private async getFileMetadata(filePath: string): Promise<FileMetadata> {
+    try {
+      const stats = await fs.promises.stat(filePath);
+      const content = await fs.promises.readFile(filePath);
+      const hash = crypto.createHash('sha256').update(content).digest('hex');
+      const ext = path.extname(filePath).toLowerCase().slice(1);
+      const language = this.detectLanguage(ext);
+      const fileType = this.classifyFileType(filePath);
+      
+      return {
+        path: filePath,
+        name: path.basename(filePath),
+        extension: ext,
+        language,
+        sizeKb: Math.ceil(stats.size / 1024),
+        contentHash: hash,
+        fileType,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get metadata for file: ${filePath}`, {
+        error: getErrorMessage(error),
+      });
+      throw error;
+    }
+  }
+
+  private detectLanguage(extension: string): string {
+    const languageMap: Record<string, string> = {
+      js: 'JavaScript',
+      ts: 'TypeScript',
+      py: 'Python',
+      java: 'Java',
+      go: 'Go',
+      // Add more as needed
+    };
+    return languageMap[extension] || 'Unknown';
+  }
+
+  private classifyFileType(filePath: string): 'source' | 'test' | 'config' | 'dev' | 'vendor' {
+    const normalizedPath = filePath.toLowerCase();
+    const fileName = path.basename(normalizedPath);
+    
+    if (normalizedPath.includes('test') || normalizedPath.includes('spec') || fileName.includes('.test.') || fileName.includes('.spec.')) {
+      return 'test';
+    }
+    if (normalizedPath.includes('config') || fileName.endsWith('.json') || fileName.endsWith('.yml') || fileName.endsWith('.yaml')) {
+      return 'config';
+    }
+    if (normalizedPath.includes('node_modules') || normalizedPath.includes('vendor')) {
+      return 'vendor';
+    }
+    if (normalizedPath.includes('scripts') || normalizedPath.includes('build') || normalizedPath.includes('dist')) {
+      return 'dev';
+    }
+    return 'source';
+  }
+}
+
+export interface FileMetadata {
+  path: string;
+  name: string;
+  extension: string;
+  language: string;
+  sizeKb: number;
+  contentHash: string;
+  fileType: 'source' | 'test' | 'config' | 'dev' | 'vendor';
 }
