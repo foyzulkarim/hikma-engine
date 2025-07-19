@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  # Hikma Engine Indexer Service (for processing source repositories)
+  hikma-indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile.indexer
+    container_name: hikma-indexer
+    restart: "no"  # Run once and exit
+    environment:
+      # Database Configuration (shared with API)
+      - HIKMA_LANCEDB_PATH=/app/data/lancedb
+      - HIKMA_SQLITE_PATH=/app/data/metadata.db
+      - HIKMA_TINKERGRAPH_URL=ws://tinkergraph:8182/gremlin
+      
+      # Source Configuration
+      - HIKMA_SOURCE_PATH=/app/source
+      - HIKMA_LOG_LEVEL=info
+    volumes:
+      - hikma-data:/app/data  # Shared data volume with API
+      - ${SOURCE_REPO_PATH:-./sample-repo}:/app/source:ro
+    depends_on:
+      - tinkergraph
+    networks:
+      - hikma-network
+    profiles:
+      - indexing  # Only start when explicitly requested
+
+  # Hikma Engine Semantic Search API
+  hikma-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: production
+    container_name: hikma-api
+    restart: unless-stopped
+    ports:
+      - "${HIKMA_API_PORT:-3000}:3000"
+    environment:
+      # Server Configuration
+      - NODE_ENV=production
+      - HIKMA_API_PORT=3000
+      - HIKMA_API_HOST=0.0.0.0
+      - HIKMA_API_TIMEOUT=30000
+      
+      # Database Configuration
+      - HIKMA_LANCEDB_PATH=/app/data/lancedb
+      - HIKMA_SQLITE_PATH=/app/data/metadata.db
+      - HIKMA_TINKERGRAPH_URL=ws://tinkergraph:8182/gremlin
+      
+      # Cache Configuration
+      - HIKMA_API_CACHE_ENABLED=true
+      
+      # Security Configuration
+      - HIKMA_API_CORS_ENABLED=true
+      - HIKMA_API_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+      
+      # Rate Limiting
+      - HIKMA_API_RATE_LIMIT_ENABLED=true
+      - HIKMA_API_RATE_LIMIT_MAX_REQUESTS=100
+      - HIKMA_API_RATE_LIMIT_WINDOW_MS=60000
+      
+      # Monitoring
+      - HIKMA_API_MONITORING_ENABLED=true
+      - HIKMA_API_HEALTH_CHECK_ENABLED=true
+      - HIKMA_API_METRICS_ENABLED=true
+      
+      # Indexing Configuration
+      - HIKMA_SOURCE_PATH=/app/source
+      - HIKMA_INDEX_ON_STARTUP=${INDEX_ON_STARTUP:-false}
+      
+      # Logging
+      - HIKMA_API_LOG_LEVEL=info
+      - HIKMA_API_LOG_FORMAT=json
+    volumes:
+      - hikma-data:/app/data
+      - hikma-logs:/app/logs
+      # Mount source repository for indexing
+      - ${SOURCE_REPO_PATH:-./sample-repo}:/app/source:ro  # Read-only mount
+    depends_on:
+      - tinkergraph
+    networks:
+      - hikma-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/v1/monitoring/liveness', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+
+  # TinkerGraph (Gremlin Server)
+  tinkergraph:
+    image: tinkerpop/gremlin-server:3.6.4
+    container_name: hikma-tinkergraph
+    restart: unless-stopped
+    ports:
+      - "${GREMLIN_PORT:-8182}:8182"
+    environment:
+      - JAVA_OPTIONS=-Xms512m -Xmx1g
+    volumes:
+      - tinkergraph-data:/opt/gremlin-server/data
+      - ./config/gremlin-server.yaml:/opt/gremlin-server/conf/gremlin-server.yaml:ro
+    networks:
+      - hikma-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8182/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: hikma-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      - hikma-api
+    networks:
+      - hikma-network
+    profiles:
+      - with-proxy
+
+  # Prometheus Monitoring (Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hikma-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - hikma-network
+    profiles:
+      - monitoring
+
+  # Grafana Dashboard (Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hikma-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - hikma-network
+    profiles:
+      - monitoring
+
+volumes:
+  hikma-data:
+    driver: local
+  hikma-logs:
+    driver: local
+
+  tinkergraph-data:
+    driver: local
+  nginx-logs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  hikma-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

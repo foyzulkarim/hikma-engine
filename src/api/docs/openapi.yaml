@@ -1,0 +1,1090 @@
+openapi: 3.0.3
+info:
+  title: Hikma Engine Semantic Search API
+  description: |
+    A comprehensive semantic search API that provides powerful search capabilities over indexed codebases.
+    The API leverages vector embeddings, AST parsing, git analysis, and multi-database storage to offer
+    semantic similarity search, structural queries, git history searches, and hybrid multi-dimensional searches.
+    
+    ## Features
+    - **Semantic Search**: Natural language and code similarity search using vector embeddings
+    - **Structural Search**: AST-based code structure queries for functions, classes, and modules
+    - **Git History Search**: Search through commit history, authors, and code evolution
+    - **Hybrid Search**: Multi-dimensional search combining semantic, structural, and temporal data
+    - **Comprehensive Search**: All-in-one search with facets, suggestions, and result categorization
+    - **Real-time Monitoring**: Health checks, performance metrics, and error tracking
+    - **Result Enhancement**: Syntax highlighting, relevance scoring, and related file discovery
+    
+    ## Authentication
+    The API supports multiple authentication methods:
+    - **API Key**: Include `X-API-Key` header with your API key
+    - **JWT**: Include `Authorization: Bearer <token>` header with your JWT token
+    - **Optional**: Many endpoints work without authentication for development
+    
+    ## Rate Limiting
+    API requests are rate-limited per IP address. Default limits:
+    - 100 requests per minute for authenticated users
+    - 50 requests per minute for unauthenticated users
+    
+    ## Response Format
+    All API responses follow a consistent format:
+    ```json
+    {
+      "success": true,
+      "data": { ... },
+      "meta": {
+        "timestamp": "2024-01-01T00:00:00.000Z",
+        "requestId": "req_123456789",
+        "processingTime": 150
+      }
+    }
+    ```
+    
+    Error responses include additional error information:
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Invalid query parameter",
+        "details": { ... }
+      },
+      "meta": { ... }
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: Hikma Engine API Support
+    url: https://github.com/hikma-engine/hikma-engine
+    email: support@hikma-engine.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.hikma-engine.com/v1
+    description: Production server
+
+paths:
+  # Search Endpoints
+  /search/semantic:
+    get:
+      tags:
+        - Search
+      summary: Semantic Search
+      description: |
+        Perform semantic similarity search using natural language queries or code snippets.
+        Results are ranked by semantic similarity using vector embeddings.
+      operationId: semanticSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query (natural language or code)
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+            example: "function to parse JSON data"
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: minSimilarity
+          in: query
+          description: Minimum similarity threshold (0.0 to 1.0)
+          schema:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.1
+        - name: nodeTypes
+          in: query
+          description: Filter by node types
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [file, function, class, interface, variable, import, export]
+        - name: includeMetadata
+          in: query
+          description: Include additional metadata in results
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Successful search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search/structure:
+    get:
+      tags:
+        - Search
+      summary: Structural Search
+      description: |
+        Search for code structures and patterns using AST-based queries.
+        Find functions, classes, interfaces, and other code elements.
+      operationId: structuralSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Structural search query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+            example: "class UserService"
+        - name: language
+          in: query
+          description: Programming language filter
+          schema:
+            type: string
+            enum: [typescript, javascript, python, java, go, cpp, c, csharp, php, ruby, rust, kotlin, swift, scala]
+        - name: type
+          in: query
+          description: Code element type filter
+          schema:
+            type: string
+            enum: [function, class, interface, variable, import, export, method, property]
+        - name: filePath
+          in: query
+          description: File path pattern filter
+          schema:
+            type: string
+            example: "src/services/*.ts"
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Successful structural search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search/git:
+    get:
+      tags:
+        - Search
+      summary: Git History Search
+      description: |
+        Search through git commit history, authors, and code evolution.
+        Find commits, changes, and authorship information.
+      operationId: gitSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Git search query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+            example: "fix authentication bug"
+        - name: author
+          in: query
+          description: Filter by commit author
+          schema:
+            type: string
+            example: "john.doe@example.com"
+        - name: dateFrom
+          in: query
+          description: Start date for commit range (ISO format)
+          schema:
+            type: string
+            format: date
+            example: "2024-01-01"
+        - name: dateTo
+          in: query
+          description: End date for commit range (ISO format)
+          schema:
+            type: string
+            format: date
+            example: "2024-12-31"
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Successful git search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search/hybrid:
+    get:
+      tags:
+        - Search
+      summary: Hybrid Search
+      description: |
+        Multi-dimensional search combining semantic similarity, structural patterns,
+        and temporal data with configurable weights.
+      operationId: hybridSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Hybrid search query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+            example: "authentication service implementation"
+        - name: weights[semantic]
+          in: query
+          description: Weight for semantic similarity (0.0 to 1.0)
+          schema:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.5
+        - name: weights[structural]
+          in: query
+          description: Weight for structural matching (0.0 to 1.0)
+          schema:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.3
+        - name: weights[temporal]
+          in: query
+          description: Weight for temporal relevance (0.0 to 1.0)
+          schema:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.2
+        - name: filters
+          in: query
+          description: Additional metadata filters (JSON object)
+          schema:
+            type: string
+            example: '{"language": "typescript", "author": "john.doe"}'
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Successful hybrid search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search/comprehensive:
+    get:
+      tags:
+        - Search
+      summary: Comprehensive Search
+      description: |
+        All-in-one search combining multiple search dimensions with facets,
+        suggestions, and result categorization.
+      operationId: comprehensiveSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Comprehensive search query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+            example: "user authentication system"
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: includeTypes
+          in: query
+          description: Node types to include in results
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [file, function, class, interface, variable, import, export, commit]
+      responses:
+        '200':
+          description: Successful comprehensive search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComprehensiveSearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Monitoring Endpoints
+  /monitoring/health:
+    get:
+      tags:
+        - Monitoring
+      summary: Health Status
+      description: Get current health status of the API and its dependencies
+      operationId: getHealthStatus
+      responses:
+        '200':
+          description: Healthy or degraded status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Unhealthy status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /monitoring/health/detailed:
+    get:
+      tags:
+        - Monitoring
+      summary: Detailed Health Status
+      description: Get detailed health status including system information
+      operationId: getDetailedHealthStatus
+      responses:
+        '200':
+          description: Detailed health information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthStatus'
+
+  /monitoring/status:
+    get:
+      tags:
+        - Monitoring
+      summary: Simple Status
+      description: Simple status endpoint for load balancers
+      operationId: getSimpleStatus
+      responses:
+        '200':
+          description: Service is operational
+          content:
+            text/plain:
+              schema:
+                type: string
+                enum: [OK, DEGRADED]
+        '503':
+          description: Service is unhealthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                enum: [UNHEALTHY, ERROR]
+
+  /monitoring/readiness:
+    get:
+      tags:
+        - Monitoring
+      summary: Readiness Probe
+      description: Kubernetes readiness probe endpoint
+      operationId: getReadinessStatus
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [not ready]
+                  failures:
+                    type: array
+                    items:
+                      type: string
+
+  /monitoring/liveness:
+    get:
+      tags:
+        - Monitoring
+      summary: Liveness Probe
+      description: Kubernetes liveness probe endpoint
+      operationId: getLivenessStatus
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [alive]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+
+  /monitoring/system:
+    get:
+      tags:
+        - Monitoring
+      summary: System Information
+      description: Get system and process information
+      operationId: getSystemInfo
+      responses:
+        '200':
+          description: System information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfo'
+
+  /monitoring/version:
+    get:
+      tags:
+        - Monitoring
+      summary: Version Information
+      description: Get API version and build information
+      operationId: getVersionInfo
+      responses:
+        '200':
+          description: Version information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionInfo'
+
+  /monitoring/errors:
+    get:
+      tags:
+        - Monitoring
+      summary: Error Statistics
+      description: Get error statistics and recent errors
+      operationId: getErrorStatistics
+      responses:
+        '200':
+          description: Error statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorStatistics'
+
+  /monitoring/performance:
+    get:
+      tags:
+        - Monitoring
+      summary: Performance Metrics
+      description: Get performance metrics and response time statistics
+      operationId: getPerformanceMetrics
+      responses:
+        '200':
+          description: Performance metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceMetrics'
+
+  /monitoring/metrics:
+    get:
+      tags:
+        - Monitoring
+      summary: Comprehensive Metrics
+      description: Get all monitoring metrics in one response
+      operationId: getComprehensiveMetrics
+      responses:
+        '200':
+          description: Comprehensive metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComprehensiveMetrics'
+
+  /monitoring/cleanup:
+    post:
+      tags:
+        - Monitoring
+      summary: Cleanup Monitoring Data
+      description: Manually trigger cleanup of old monitoring data
+      operationId: cleanupMonitoringData
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                olderThanHours:
+                  type: integer
+                  minimum: 1
+                  default: 24
+                  description: Clean up data older than specified hours
+      responses:
+        '200':
+          description: Cleanup completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CleanupResult'
+
+components:
+  schemas:
+    # Search Response Schemas
+    SearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResultItem'
+        totalResults:
+          type: integer
+          description: Total number of results found
+        processingTime:
+          type: integer
+          description: Processing time in milliseconds
+      required:
+        - results
+        - totalResults
+        - processingTime
+
+    ComprehensiveSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/SearchResponse'
+        - type: object
+          properties:
+            facets:
+              $ref: '#/components/schemas/SearchFacets'
+            suggestions:
+              type: array
+              items:
+                type: string
+              description: Query suggestions for better results
+
+    SearchResultItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the result
+        type:
+          type: string
+          enum: [file, function, class, interface, variable, import, export, commit]
+          description: Type of the search result
+        title:
+          type: string
+          description: Title or name of the result
+        snippet:
+          type: string
+          description: Code snippet or content preview
+        filePath:
+          type: string
+          description: File path of the result
+        lineNumbers:
+          type: object
+          properties:
+            start:
+              type: integer
+            end:
+              type: integer
+          description: Line number range in the file
+        similarity:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Similarity score (0.0 to 1.0)
+        rank:
+          type: integer
+          description: Ranking position in results
+        metadata:
+          type: object
+          properties:
+            language:
+              type: string
+            author:
+              type: string
+            lastModified:
+              type: string
+              format: date-time
+            fileSize:
+              type: integer
+          description: Additional metadata about the result
+        context:
+          type: object
+          properties:
+            beforeLines:
+              type: array
+              items:
+                type: string
+            afterLines:
+              type: array
+              items:
+                type: string
+            relatedFiles:
+              type: array
+              items:
+                type: string
+          description: Contextual information around the result
+        enhancement:
+          type: object
+          properties:
+            syntaxHighlighted:
+              type: string
+              description: HTML syntax highlighted code
+            relevanceExplanation:
+              type: string
+              description: Explanation of why this result is relevant
+            breadcrumbs:
+              type: array
+              items:
+                type: string
+              description: File path breadcrumbs
+      required:
+        - id
+        - type
+        - title
+        - similarity
+        - rank
+
+    SearchFacets:
+      type: object
+      properties:
+        languages:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+        authors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+        fileTypes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+
+    # Monitoring Response Schemas
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: integer
+          description: Uptime in milliseconds
+        version:
+          type: string
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [pass, fail, warn]
+              message:
+                type: string
+              responseTime:
+                type: integer
+              details:
+                type: object
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            passed:
+              type: integer
+            failed:
+              type: integer
+            warnings:
+              type: integer
+      required:
+        - status
+        - timestamp
+        - uptime
+        - checks
+        - summary
+
+    DetailedHealthStatus:
+      type: object
+      properties:
+        health:
+          $ref: '#/components/schemas/HealthStatus'
+        system:
+          $ref: '#/components/schemas/SystemInfo'
+        metrics:
+          type: object
+          description: Additional metrics data
+
+    SystemInfo:
+      type: object
+      properties:
+        node:
+          type: object
+          properties:
+            version:
+              type: string
+            platform:
+              type: string
+            arch:
+              type: string
+            uptime:
+              type: number
+        process:
+          type: object
+          properties:
+            pid:
+              type: integer
+            memory:
+              type: object
+              properties:
+                rss:
+                  type: integer
+                heapTotal:
+                  type: integer
+                heapUsed:
+                  type: integer
+                external:
+                  type: integer
+            cpuUsage:
+              type: object
+              properties:
+                user:
+                  type: integer
+                system:
+                  type: integer
+        api:
+          type: object
+          properties:
+            version:
+              type: string
+            environment:
+              type: string
+            startTime:
+              type: string
+              format: date-time
+            uptime:
+              type: integer
+
+    VersionInfo:
+      type: object
+      properties:
+        api:
+          type: string
+        node:
+          type: string
+        environment:
+          type: string
+        buildTime:
+          type: string
+        gitCommit:
+          type: string
+
+    ErrorStatistics:
+      type: object
+      properties:
+        summary:
+          type: object
+          properties:
+            totalErrors:
+              type: integer
+            recentErrors:
+              type: array
+              items:
+                type: object
+        detailed:
+          type: array
+          items:
+            type: object
+            properties:
+              errorCode:
+                type: string
+              statusCode:
+                type: integer
+              count:
+                type: integer
+              firstOccurrence:
+                type: string
+                format: date-time
+              lastOccurrence:
+                type: string
+                format: date-time
+
+    PerformanceMetrics:
+      type: object
+      properties:
+        metrics:
+          type: object
+          properties:
+            requests:
+              type: object
+              properties:
+                total:
+                  type: integer
+                errorRate:
+                  type: number
+            responseTime:
+              type: object
+              properties:
+                average:
+                  type: integer
+                status:
+                  type: string
+                  enum: [fast, moderate, slow]
+            slowQueries:
+              type: object
+              properties:
+                count:
+                  type: integer
+                recent:
+                  type: array
+                  items:
+                    type: object
+
+    ComprehensiveMetrics:
+      type: object
+      properties:
+        errors:
+          $ref: '#/components/schemas/ErrorStatistics'
+        performance:
+          $ref: '#/components/schemas/PerformanceMetrics'
+        health:
+          $ref: '#/components/schemas/HealthStatus'
+        system:
+          $ref: '#/components/schemas/SystemInfo'
+        alerts:
+          type: array
+          items:
+            type: object
+
+    CleanupResult:
+      type: object
+      properties:
+        message:
+          type: string
+        before:
+          type: object
+          properties:
+            errorSamples:
+              type: integer
+            slowQueries:
+              type: integer
+        after:
+          type: object
+          properties:
+            errorSamples:
+              type: integer
+            slowQueries:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    # Common Response Schemas
+    APIResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+        meta:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            requestId:
+              type: string
+            processingTime:
+              type: integer
+      required:
+        - success
+        - meta
+
+    ValidationError:
+      allOf:
+        - $ref: '#/components/schemas/APIResponse'
+        - type: object
+          properties:
+            success:
+              type: boolean
+              enum: [false]
+            error:
+              type: object
+              properties:
+                code:
+                  type: string
+                  enum: [VALIDATION_ERROR]
+                message:
+                  type: string
+                details:
+                  type: object
+                  properties:
+                    field:
+                      type: string
+                    value:
+                      type: string
+                    constraint:
+                      type: string
+
+  responses:
+    ValidationError:
+      description: Validation error in request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum: [false]
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        enum: [RATE_LIMIT_EXCEEDED]
+                      message:
+                        type: string
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum: [false]
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        enum: [INTERNAL_ERROR]
+                      message:
+                        type: string
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+    
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+  - {} # Allow unauthenticated access for development
+
+tags:
+  - name: Search
+    description: Search operations for semantic, structural, git, and hybrid queries
+  - name: Monitoring
+    description: Health checks, metrics, and system monitoring endpoints

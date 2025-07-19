@@ -1,0 +1,265 @@
+# Artillery Load Testing Configuration for Hikma Engine API
+# Usage: artillery run load-tests/artillery-config.yml
+
+config:
+  target: 'http://localhost:3000'
+  phases:
+    # Warm-up phase
+    - duration: 60
+      arrivalRate: 5
+      name: "Warm-up"
+    
+    # Ramp-up phase
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 20
+      name: "Ramp-up"
+    
+    # Sustained load phase
+    - duration: 300
+      arrivalRate: 20
+      name: "Sustained load"
+    
+    # Peak load phase
+    - duration: 120
+      arrivalRate: 20
+      rampTo: 50
+      name: "Peak load"
+    
+    # Cool-down phase
+    - duration: 60
+      arrivalRate: 50
+      rampTo: 5
+      name: "Cool-down"
+
+  defaults:
+    headers:
+      Content-Type: 'application/json'
+      User-Agent: 'Artillery Load Test'
+      Accept: 'application/json'
+
+  variables:
+    # Test queries for different search types
+    semanticQueries:
+      - "function authentication"
+      - "class user service"
+      - "error handling"
+      - "database connection"
+      - "API endpoint"
+      - "validation logic"
+      - "configuration management"
+      - "logging utility"
+      - "cache implementation"
+      - "security middleware"
+    
+    structuralQueries:
+      - "class UserService"
+      - "function validateInput"
+      - "interface ApiResponse"
+      - "type SearchResult"
+      - "enum ErrorCode"
+    
+    gitQueries:
+      - "fix authentication bug"
+      - "add new feature"
+      - "update dependencies"
+      - "refactor code"
+      - "improve performance"
+    
+    languages:
+      - "typescript"
+      - "javascript"
+      - "python"
+      - "java"
+      - "go"
+
+  plugins:
+    metrics-by-endpoint:
+      useOnlyRequestNames: true
+
+scenarios:
+  # Health check scenario (lightweight)
+  - name: "Health Checks"
+    weight: 20
+    flow:
+      - get:
+          url: "/api/v1/monitoring/health"
+          name: "Health Check"
+      - get:
+          url: "/api/v1/monitoring/liveness"
+          name: "Liveness Check"
+      - get:
+          url: "/api/v1/monitoring/readiness"
+          name: "Readiness Check"
+
+  # Semantic search scenario
+  - name: "Semantic Search"
+    weight: 30
+    flow:
+      - get:
+          url: "/api/v1/search/semantic"
+          qs:
+            q: "{{ $randomString(semanticQueries) }}"
+            limit: "{{ $randomInt(5, 20) }}"
+            minSimilarity: "{{ $randomFloat(0.1, 0.8) }}"
+          name: "Semantic Search"
+          capture:
+            - json: "$.data.totalResults"
+              as: "totalResults"
+      - think: 1
+
+  # Structural search scenario
+  - name: "Structural Search"
+    weight: 20
+    flow:
+      - get:
+          url: "/api/v1/search/structure"
+          qs:
+            q: "{{ $randomString(structuralQueries) }}"
+            language: "{{ $randomString(languages) }}"
+            limit: "{{ $randomInt(5, 15) }}"
+          name: "Structural Search"
+      - think: 1
+
+  # Git search scenario
+  - name: "Git Search"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/v1/search/git"
+          qs:
+            q: "{{ $randomString(gitQueries) }}"
+            limit: "{{ $randomInt(5, 10) }}"
+          name: "Git Search"
+      - think: 1
+
+  # Hybrid search scenario
+  - name: "Hybrid Search"
+    weight: 10
+    flow:
+      - get:
+          url: "/api/v1/search/hybrid"
+          qs:
+            q: "{{ $randomString(semanticQueries) }}"
+            "weights[semantic]": "{{ $randomFloat(0.3, 0.7) }}"
+            "weights[structural]": "{{ $randomFloat(0.2, 0.5) }}"
+            "weights[temporal]": "{{ $randomFloat(0.1, 0.3) }}"
+            limit: "{{ $randomInt(5, 15) }}"
+          name: "Hybrid Search"
+      - think: 2
+
+  # Comprehensive search scenario
+  - name: "Comprehensive Search"
+    weight: 5
+    flow:
+      - get:
+          url: "/api/v1/search/comprehensive"
+          qs:
+            q: "{{ $randomString(semanticQueries) }}"
+            limit: "{{ $randomInt(10, 30) }}"
+          name: "Comprehensive Search"
+      - think: 3
+
+  # Monitoring endpoints scenario
+  - name: "Monitoring"
+    weight: 10
+    flow:
+      - get:
+          url: "/api/v1/monitoring/system"
+          name: "System Info"
+      - get:
+          url: "/api/v1/monitoring/performance"
+          name: "Performance Metrics"
+      - get:
+          url: "/api/v1/monitoring/errors"
+          name: "Error Statistics"
+      - think: 1
+
+  # Mixed workload scenario (realistic usage pattern)
+  - name: "Mixed Workload"
+    weight: 15
+    flow:
+      # Start with health check
+      - get:
+          url: "/api/v1/monitoring/health"
+          name: "Health Check"
+      
+      # Perform semantic search
+      - get:
+          url: "/api/v1/search/semantic"
+          qs:
+            q: "{{ $randomString(semanticQueries) }}"
+            limit: "10"
+          name: "Semantic Search"
+      
+      # Think time
+      - think: "{{ $randomInt(1, 5) }}"
+      
+      # Follow up with structural search
+      - get:
+          url: "/api/v1/search/structure"
+          qs:
+            q: "{{ $randomString(structuralQueries) }}"
+            language: "typescript"
+            limit: "5"
+          name: "Structural Search"
+      
+      # Think time
+      - think: "{{ $randomInt(2, 8) }}"
+      
+      # Check system status
+      - get:
+          url: "/api/v1/monitoring/system"
+          name: "System Info"
+
+  # Error testing scenario
+  - name: "Error Testing"
+    weight: 5
+    flow:
+      # Test validation errors
+      - get:
+          url: "/api/v1/search/semantic"
+          qs:
+            limit: "invalid"
+          name: "Validation Error Test"
+          expect:
+            - statusCode: 400
+      
+      # Test missing parameters
+      - get:
+          url: "/api/v1/search/semantic"
+          name: "Missing Parameter Test"
+          expect:
+            - statusCode: 400
+      
+      # Test 404 errors
+      - get:
+          url: "/api/v1/non-existent-endpoint"
+          name: "404 Error Test"
+          expect:
+            - statusCode: 404
+
+# Performance thresholds
+expect:
+  # Response time thresholds
+  - http.response_time:
+      p95: 2000  # 95% of requests should complete within 2 seconds
+      p99: 5000  # 99% of requests should complete within 5 seconds
+      max: 10000 # No request should take more than 10 seconds
+  
+  # Error rate thresholds
+  - http.codes.200: 
+      min: 80    # At least 80% of requests should succeed
+  - http.codes.400:
+      max: 15    # At most 15% validation errors
+  - http.codes.500:
+      max: 5     # At most 5% server errors
+
+# Custom metrics
+metrics:
+  - name: "search_response_time"
+    unit: "ms"
+  - name: "cache_hit_rate"
+    unit: "percent"
+  - name: "memory_usage"
+    unit: "mb"

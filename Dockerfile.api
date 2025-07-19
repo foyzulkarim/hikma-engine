@@ -1,0 +1,76 @@
+# Multi-stage build for Hikma Engine Semantic Search API
+FROM node:18-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies (including dev dependencies for building)
+RUN npm ci
+
+# Copy source code
+COPY src/ ./src/
+
+# Build the application
+RUN npm run build
+
+# Remove dev dependencies
+RUN npm prune --production
+
+# Production stage
+FROM node:18-alpine AS production
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S hikma -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+
+# Create data directory for databases
+RUN mkdir -p /app/data && \
+    chown -R hikma:nodejs /app
+
+# Switch to non-root user
+USER hikma
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/v1/monitoring/liveness', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV HIKMA_API_PORT=3000
+ENV HIKMA_API_HOST=0.0.0.0
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["node", "dist/api/server.js"]
+
+# Labels for metadata
+LABEL maintainer="Hikma Engine Team <support@hikma-engine.com>"
+LABEL version="1.0.0"
+LABEL description="Hikma Engine Semantic Search API"
+LABEL org.opencontainers.image.title="Hikma Engine API"
+LABEL org.opencontainers.image.description="A comprehensive semantic search API for indexed codebases"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.vendor="Hikma Engine"
+LABEL org.opencontainers.image.licenses="MIT"

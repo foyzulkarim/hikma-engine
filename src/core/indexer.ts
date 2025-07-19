@@ -10,10 +10,13 @@ import { GitAnalyzer } from '../modules/git-analyzer';
 import { SummaryGenerator } from '../modules/summary-generator';
 import { EmbeddingService } from '../modules/embedding-service';
 import { DataLoader } from '../modules/data-loader';
-import { NodeWithEmbedding, Edge, FileNode, DirectoryNode } from '../types';
+import { NodeWithEmbedding, Edge, FileNode, DirectoryNode, RepositoryNode } from '../types';
 import { ConfigManager } from '../config';
 import { Logger, getLogger } from '../utils/logger';
 import { getErrorMessage, logError } from '../utils/error-handling';
+import { v4 as uuidv4 } from 'uuid';
+import { FileMetadata } from '../modules/file-scanner';
+import * as path from 'path';
 
 export interface IndexingResult {
   totalNodes: number;
@@ -51,34 +54,36 @@ export class Indexer {
    */
   async run(options: IndexingOptions = {}): Promise<IndexingResult> {
     const startTime = Date.now();
-    this.logger.info('Starting hikma-engine indexing pipeline', { 
+    this.logger.info('Starting hikma-engine indexing pipeline', {
       projectRoot: this.projectRoot,
-      options 
+      options
     });
 
     try {
       // Phase 0: Initialize and determine indexing strategy
-      this.logger.debug('Phase 0: Determining indexing strategy...');
+      this.logger.info('Phase 0: Determining indexing strategy...');
       const indexingStrategy = await this.determineIndexingStrategy(options);
       this.logger.info('Indexing strategy determined', indexingStrategy);
 
       // Phase 1: File Discovery
       this.logger.debug('Phase 1: Starting file discovery...');
       const filesToProcess = await this.discoverFiles(indexingStrategy);
-      this.logger.info(`Discovered ${filesToProcess.length} files to process`);
-
-      if (filesToProcess.length === 0) {
-        this.logger.info('No files to process, indexing complete');
-        return this.createResult(startTime, 0, 0, filesToProcess.length, indexingStrategy.isIncremental);
-      }
+      
+      // Create repository node
+      const repoNode = await this.createRepositoryNode();
+      const fileNodes = await this.createFileNodes(filesToProcess, repoNode.id);
 
       // Phase 2: AST Parsing and Structure Extraction
-      const { nodes: astNodes, edges: astEdges } = await this.parseAndExtractStructure(filesToProcess);
+      const pathToIdMap = new Map<string, string>();
+      fileNodes.forEach(node => {
+        pathToIdMap.set(node.properties.filePath, node.id);
+      });
+      const { nodes: astNodes, edges: astEdges } = await this.parseAndExtractStructure(filesToProcess, pathToIdMap, repoNode.id);
       this.logger.info(`Extracted ${astNodes.length} nodes and ${astEdges.length} edges from AST parsing`);
 
       // Phase 3: AI Summary Generation (optional)
-      const nodesWithSummaries = options.skipAISummary 
-        ? astNodes 
+      const nodesWithSummaries = options.skipAISummary
+        ? astNodes
         : await this.generateAISummaries(astNodes);
       this.logger.info('AI summary generation completed');
 
@@ -90,12 +95,12 @@ export class Indexer {
       this.logger.info(`Analyzed Git history: ${gitNodes.length} nodes, ${gitEdges.length} edges`);
 
       // Phase 5: Combine all nodes and edges
-      const allNodes = [...nodesWithSummaries, ...gitNodes];
+      const allNodes = [repoNode, ...fileNodes, ...nodesWithSummaries, ...gitNodes];
       const allEdges = [...astEdges, ...gitEdges];
       this.logger.info(`Total nodes: ${allNodes.length}, Total edges: ${allEdges.length}`);
 
       // Phase 6: Embedding Generation (optional)
-      const nodesWithEmbeddings = options.skipEmbeddings 
+      const nodesWithEmbeddings = options.skipEmbeddings
         ? allNodes.map(node => ({ ...node, embedding: [] })) as NodeWithEmbedding[]
         : await this.generateEmbeddings(allNodes);
       this.logger.info(`Generated embeddings for ${nodesWithEmbeddings.length} nodes`);
@@ -129,16 +134,16 @@ export class Indexer {
     currentCommitHash: string | null;
     changedFiles: string[];
   }> {
-    this.logger.debug('Creating GitAnalyzer...');
+    this.logger.info('Creating GitAnalyzer...');
     const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
-    
+    this.logger.info('GitAnalyzer created successfully');
     try {
-      this.logger.debug('Getting current commit hash...');
+      this.logger.info('Getting current commit hash...');
       const currentCommitHash = await gitAnalyzer.getCurrentCommitHash();
-      this.logger.debug('Current commit hash retrieved', { currentCommitHash });
-      
+      this.logger.info('Current commit hash retrieved', { currentCommitHash });
+
       if (options.forceFullIndex) {
-        this.logger.debug('Force full index requested');
+        this.logger.info('Force full index requested');
         return {
           isIncremental: false,
           lastCommitHash: null,
@@ -147,12 +152,12 @@ export class Indexer {
         };
       }
 
-      this.logger.debug('Getting last indexed commit...');
+      this.logger.info('Getting last indexed commit...');
       const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
-      this.logger.debug('Last indexed commit retrieved', { lastCommitHash });
-      
+      this.logger.info('Last indexed commit retrieved', { lastCommitHash });
+
       if (!lastCommitHash || !currentCommitHash) {
-        this.logger.debug('No previous index found, using full indexing');
+        this.logger.info('No previous index found, using full indexing');
         return {
           isIncremental: false,
           lastCommitHash: null,
@@ -172,7 +177,7 @@ export class Indexer {
       }
 
       const changedFiles = await gitAnalyzer.getChangedFiles(lastCommitHash, currentCommitHash);
-      
+
       return {
         isIncremental: true,
         lastCommitHash,
@@ -193,10 +198,10 @@ export class Indexer {
   /**
    * Discovers files to be processed based on the indexing strategy.
    */
-  private async discoverFiles(strategy: { changedFiles: string[] }): Promise<string[]> {
+  private async discoverFiles(strategy: { changedFiles: string[] }): Promise<FileMetadata[]> {
     const fileScanner = new FileScanner(this.projectRoot, this.config);
     const indexingConfig = this.config.getIndexingConfig();
-    
+
     return await fileScanner.findAllFiles(
       indexingConfig.filePatterns,
       strategy.changedFiles.length > 0 ? strategy.changedFiles : undefined
@@ -206,13 +211,13 @@ export class Indexer {
   /**
    * Parses files and extracts structural information.
    */
-  private async parseAndExtractStructure(files: string[]): Promise<{
-    nodes: (import('../types').CodeNode | FileNode | import('../types').DirectoryNode | import('../types').TestNode)[];
+  private async parseAndExtractStructure(files: FileMetadata[], pathToIdMap: Map<string, string>, repoId: string): Promise<{
+    nodes: (import('../types').CodeNode | FileNode | import('../types').DirectoryNode | import('../types').TestNode | import('../types').FunctionNode)[];
     edges: Edge[];
   }> {
-    const astParser = new AstParser(this.projectRoot, this.config);
-    await astParser.parseFiles(files);
-    
+    const astParser = new AstParser(this.projectRoot, this.config, repoId);
+    await astParser.parseFiles(files.map(f => f.path), pathToIdMap);
+
     return {
       nodes: astParser.getNodes(),
       edges: astParser.getEdges(),
@@ -247,7 +252,7 @@ export class Indexer {
   }> {
     const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
     await gitAnalyzer.analyzeRepo(fileNodes, lastCommitHash);
-    
+
     return {
       nodes: gitAnalyzer.getNodes(),
       edges: gitAnalyzer.getEdges(),
@@ -260,7 +265,7 @@ export class Indexer {
   private async generateEmbeddings(nodes: any[]): Promise<NodeWithEmbedding[]> {
     const embeddingService = new EmbeddingService(this.config);
     await embeddingService.loadModel();
-    
+
     return await embeddingService.embedNodes(nodes);
   }
 
@@ -272,10 +277,9 @@ export class Indexer {
     const dataLoader = new DataLoader(
       dbConfig.lancedb.path,
       dbConfig.sqlite.path,
-      dbConfig.tinkergraph.url,
       this.config
     );
-    
+
     await dataLoader.load(nodes, edges);
   }
 
@@ -321,7 +325,7 @@ export class Indexer {
     try {
       const gitAnalyzer = new GitAnalyzer(this.projectRoot, this.config);
       const lastCommitHash = await gitAnalyzer.getLastIndexedCommit();
-      
+
       // TODO: Get actual stats from databases
       return {
         lastIndexedAt: null, // TODO: Implement
@@ -333,5 +337,38 @@ export class Indexer {
       logError(this.logger, 'Failed to get indexing stats', error);
       throw error;
     }
+  }
+
+  private async createRepositoryNode(): Promise<RepositoryNode> {
+    const repoId = uuidv4();
+    const repoName = path.basename(this.projectRoot);
+    const now = new Date().toISOString();
+    return {
+      id: repoId,
+      type: 'RepositoryNode',
+      properties: {
+        repoPath: this.projectRoot,
+        repoName,
+        createdAt: now,
+        lastUpdated: now,
+      }
+    };
+  }
+
+  private async createFileNodes(metadataList: FileMetadata[], repoId: string): Promise<FileNode[]> {
+    return metadataList.map(meta => ({
+      id: uuidv4(),
+      type: 'FileNode',
+      properties: {
+        filePath: meta.path,
+        fileName: meta.name,
+        fileExtension: meta.extension,
+        repoId,
+        language: meta.language,
+        sizeKb: meta.sizeKb,
+        contentHash: meta.contentHash,
+        fileType: meta.fileType,
+      }
+    }));
   }
 }

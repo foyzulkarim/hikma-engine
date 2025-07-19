@@ -73,9 +73,9 @@ export class GitAnalyzer {
    */
   async getLastIndexedCommit(): Promise<string | null> {
     try {
-      this.sqliteClient.connect();
+      await this.sqliteClient.connect();
       const result = this.sqliteClient.getLastIndexedCommit();
-      this.sqliteClient.disconnect();
+      await this.sqliteClient.disconnect();
       return result;
     } catch (error) {
       this.logger.warn('Failed to get last indexed commit', { error: getErrorMessage(error) });
@@ -90,9 +90,9 @@ export class GitAnalyzer {
    */
   async setLastIndexedCommit(commitHash: string): Promise<void> {
     try {
-      this.sqliteClient.connect();
-      this.sqliteClient.setLastIndexedCommit(commitHash);
-      this.sqliteClient.disconnect();
+      await this.sqliteClient.connect();
+      await this.sqliteClient.setLastIndexedCommit(commitHash);
+      await this.sqliteClient.disconnect();
       this.logger.debug('Updated last indexed commit', { commitHash });
     } catch (error) {
       this.logger.error('Failed to set last indexed commit', { error: getErrorMessage(error) });
