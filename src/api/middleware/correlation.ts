@@ -15,6 +15,7 @@ const logger = getLogger('CorrelationMiddleware');
 export interface RequestContext {
   requestId: string;
   startTime: number;
+  hrStartTime?: bigint;
   ip: string;
   userAgent?: string;
   method: string;
@@ -111,6 +112,13 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
     const duration = Date.now() - startTime;
     const contentLength = Buffer.byteLength(data || '', 'utf8');
     
+    // Calculate high-precision timing if available
+    let hrDuration: number | undefined;
+    if (context.hrStartTime) {
+      const hrEndTime = process.hrtime.bigint();
+      hrDuration = Number(hrEndTime - context.hrStartTime) / 1_000_000; // Convert to milliseconds
+    }
+    
     logger.info('Request completed', {
       requestId,
       sessionId,
@@ -124,9 +132,14 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
       timestamp: new Date().toISOString(),
     });
     
-    // Add performance headers
-    res.setHeader('X-Response-Time', `${duration}ms`);
-    res.setHeader('X-Content-Length', `${contentLength}B`);
+    // Add performance headers (only if response hasn't been sent)
+    if (!res.headersSent) {
+      res.setHeader('X-Response-Time', `${duration}ms`);
+      res.setHeader('X-Content-Length', `${contentLength}B`);
+      if (hrDuration !== undefined) {
+        res.setHeader('X-Process-Time', `${hrDuration.toFixed(2)}ms`);
+      }
+    }
     
     return originalSend.call(this, data);
   };
@@ -135,6 +148,13 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
   const originalJson = res.json;
   res.json = function(data) {
     const duration = Date.now() - startTime;
+    
+    // Calculate high-precision timing if available
+    let hrDuration: number | undefined;
+    if (context.hrStartTime) {
+      const hrEndTime = process.hrtime.bigint();
+      hrDuration = Number(hrEndTime - context.hrStartTime) / 1_000_000; // Convert to milliseconds
+    }
     
     // Log errors for non-success responses
     if (res.statusCode >= 400) {
@@ -152,6 +172,14 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
       });
     }
     
+    // Add performance headers (only if response hasn't been sent)
+    if (!res.headersSent) {
+      res.setHeader('X-Response-Time', `${duration}ms`);
+      if (hrDuration !== undefined) {
+        res.setHeader('X-Process-Time', `${hrDuration.toFixed(2)}ms`);
+      }
+    }
+    
     return originalJson.call(this, data);
   };
   
@@ -163,6 +191,11 @@ export function correlationMiddleware(req: Request, res: Response, next: NextFun
  */
 export function timingMiddleware(req: Request, res: Response, next: NextFunction) {
   const startTime = process.hrtime.bigint();
+  
+  // Store timing info in request context for later use
+  if (req.context) {
+    req.context.hrStartTime = startTime;
+  }
   
   res.on('finish', () => {
     const endTime = process.hrtime.bigint();
@@ -179,8 +212,8 @@ export function timingMiddleware(req: Request, res: Response, next: NextFunction
       timestamp: new Date().toISOString(),
     });
     
-    // Add high-precision timing header
-    res.setHeader('X-Process-Time', `${duration.toFixed(2)}ms`);
+    // Note: Headers are set in correlationMiddleware before response is sent
+    // This event handler only logs timing information
   });
   
   next();
