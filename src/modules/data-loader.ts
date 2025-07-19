@@ -3,9 +3,9 @@
  *       Manages data persistence across LanceDB (vector), TinkerGraph (graph), and SQLite (relational) databases.
  */
 
-import { NodeWithEmbedding, Edge, FileNode, DirectoryNode, CodeNode, CommitNode, TestNode, PullRequestNode, RepositoryNode, FunctionNode } from '../types';
+import { NodeWithEmbedding, Edge, FileNode, DirectoryNode, CodeNode, CommitNode, TestNode, PullRequestNode, RepositoryNode, FunctionNode, BaseNode } from '../types';
 import * as crypto from 'crypto';
-import { LanceDBClient, SQLiteClient, TinkerGraphClient } from '../persistence/db-clients';
+import { LanceDBClient, SQLiteClient } from '../persistence/db-clients';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { 
@@ -25,36 +25,30 @@ import {
 export class DataLoader {
   private lancedbPath: string;
   private sqlitePath: string;
-  private tinkergraphUrl: string;
   private config: ConfigManager;
   private logger = getLogger('DataLoader');
 
   private lancedbClient: LanceDBClient;
   private sqliteClient: SQLiteClient;
-  private tinkergraphClient: TinkerGraphClient;
 
   /**
    * Initializes the DataLoader with database connection parameters.
    * @param {string} lancedbPath - Path to the LanceDB database.
    * @param {string} sqlitePath - Path to the SQLite database file.
-   * @param {string} tinkergraphUrl - URL for the TinkerGraph Gremlin server.
    * @param {ConfigManager} config - Configuration manager instance.
    */
-  constructor(lancedbPath: string, sqlitePath: string, tinkergraphUrl: string, config: ConfigManager) {
+  constructor(lancedbPath: string, sqlitePath: string, config: ConfigManager) {
     this.lancedbPath = lancedbPath;
     this.sqlitePath = sqlitePath;
-    this.tinkergraphUrl = tinkergraphUrl;
     this.config = config;
 
     // Initialize database clients
     this.lancedbClient = new LanceDBClient(lancedbPath);
     this.sqliteClient = new SQLiteClient(sqlitePath);
-    this.tinkergraphClient = new TinkerGraphClient(tinkergraphUrl);
 
     this.logger.info('DataLoader initialized', {
       lancedbPath,
       sqlitePath,
-      tinkergraphUrl,
     });
   }
 
@@ -64,13 +58,11 @@ export class DataLoader {
   private async connectToDatabases(): Promise<{
     lancedb: boolean;
     sqlite: boolean;
-    tinkergraph: boolean;
   }> {
     const operation = this.logger.operation('Connecting to databases');
     const connectionStatus = {
       lancedb: false,
       sqlite: false,
-      tinkergraph: false,
     };
 
     this.logger.info('Connecting to all databases');
@@ -84,13 +76,6 @@ export class DataLoader {
         this.logger.warn('Failed to connect to LanceDB', { error: getErrorMessage(error) });
       }),
 
-      this.connectToTinkerGraph().then(() => {
-        connectionStatus.tinkergraph = true;
-        this.logger.info('TinkerGraph connected successfully');
-      }).catch((error) => {
-        this.logger.warn('Failed to connect to TinkerGraph', { error: getErrorMessage(error) });
-      }),
-
       this.connectToSQLite().then(() => {
         connectionStatus.sqlite = true;
         this.logger.info('SQLite connected successfully');
@@ -102,7 +87,7 @@ export class DataLoader {
     await Promise.allSettled(connectionPromises);
 
     const connectedCount = Object.values(connectionStatus).filter(Boolean).length;
-    this.logger.info(`Connected to ${connectedCount}/3 databases`, connectionStatus);
+    this.logger.info(`Connected to ${connectedCount}/2 databases`, connectionStatus);
 
     // Require at least one database to be connected
     if (connectedCount === 0) {
@@ -134,27 +119,6 @@ export class DataLoader {
         error: getErrorMessage(error) 
       });
       throw new DatabaseConnectionError('LanceDB', `Connection failed: ${getErrorMessage(error)}`, error);
-    }
-  }
-
-  /**
-   * Connects to TinkerGraph with retry logic and circuit breaker.
-   */
-  private async connectToTinkerGraph(): Promise<void> {
-    try {
-      await withRetry(
-        async () => {
-          await this.tinkergraphClient.connect();
-        },
-        DEFAULT_RETRY_CONFIG,
-        this.logger,
-        'TinkerGraph connection'
-      );
-    } catch (error) {
-      this.logger.error('Failed to connect to TinkerGraph after all retries', { 
-        error: getErrorMessage(error) 
-      });
-      throw new DatabaseConnectionError('TinkerGraph', `Connection failed: ${getErrorMessage(error)}`, error);
     }
   }
 
@@ -191,10 +155,6 @@ export class DataLoader {
     const disconnectionPromises = [
       this.lancedbClient.disconnect().catch((error) => {
         this.logger.warn('Failed to disconnect from LanceDB', { error: getErrorMessage(error) });
-      }),
-
-      this.tinkergraphClient.disconnect().catch((error) => {
-        this.logger.warn('Failed to disconnect from TinkerGraph', { error: getErrorMessage(error) });
       }),
 
       Promise.resolve().then(() => {
@@ -274,69 +234,83 @@ export class DataLoader {
   }
 
   /**
-   * Loads nodes and edges into TinkerGraph for graph traversal queries.
+   * Loads nodes and edges into SQLite enhanced graph storage for deep relationship queries.
    * @param {NodeWithEmbedding[]} nodes - Array of nodes.
    * @param {Edge[]} edges - Array of edges.
    */
   private async batchLoadToGraphDB(nodes: NodeWithEmbedding[], edges: Edge[]): Promise<void> {
-    const operation = this.logger.operation(`Loading ${nodes.length} nodes and ${edges.length} edges to TinkerGraph`);
+    const operation = this.logger.operation(`Loading ${nodes.length} nodes and ${edges.length} edges to Enhanced SQLite Graph`);
 
     try {
-      this.logger.info(`Starting TinkerGraph batch load for ${nodes.length} nodes and ${edges.length} edges`);
+      this.logger.info(`Starting enhanced SQLite graph batch load for ${nodes.length} nodes and ${edges.length} edges`);
 
-      // Load vertices (nodes)
-      const vertexMap = new Map<string, any>();
+      // Convert NodeWithEmbedding to EnhancedBaseNode format
+      const enhancedNodes = nodes.map(node => ({
+        id: node.id,
+        businessKey: node.id, // For now, use ID as business key - will be enhanced by AST parser
+        type: node.type,
+        properties: node.properties,
+        repoId: node.properties.repoId || node.properties.repoPath,
+        commitSha: undefined, // Will be set by git analyzer
+        filePath: node.properties.filePath || node.properties.path,
+        line: node.properties.startLine,
+        col: node.properties.startCol,
+        signatureHash: this.generateSignatureHash(node),
+        labels: node.properties.labels || []
+      }));
 
-      for (const node of nodes) {
-        try {
-          const vertex = await this.tinkergraphClient.addVertex(node.type, {
-            id: node.id,
-            ...node.properties,
-          });
-          vertexMap.set(node.id, vertex);
-        } catch (error) {
-          this.logger.warn(`Failed to add vertex: ${node.id}`, { error: getErrorMessage(error) });
-        }
-      }
+      // Convert Edge to EnhancedEdge format
+      const enhancedEdges = edges.map(edge => ({
+        id: `${edge.source}-${edge.type}-${edge.target}`,
+        source: edge.source,
+        target: edge.target,
+        sourceBusinessKey: edge.source, // Will be enhanced
+        targetBusinessKey: edge.target, // Will be enhanced
+        type: edge.type,
+        properties: edge.properties,
+        line: edge.properties?.line,
+        col: edge.properties?.col,
+        dynamic: edge.properties?.dynamic || false
+      }));
 
-      this.logger.debug(`Added ${vertexMap.size} vertices to TinkerGraph`);
+      // Load enhanced nodes into graph storage
+      const nodeResult = await this.sqliteClient.batchInsertEnhancedGraphNodes(enhancedNodes);
+      this.logger.debug(`Added ${nodeResult.success} enhanced nodes to SQLite graph`, {
+        failed: nodeResult.failed,
+        errors: nodeResult.errors.slice(0, 5)
+      });
 
-      // Load edges
-      let edgesAdded = 0;
-      for (const edge of edges) {
-        try {
-          if (vertexMap.has(edge.source) && vertexMap.has(edge.target)) {
-            await this.tinkergraphClient.addEdge(
-              edge.source,
-              edge.target,
-              edge.type,
-              edge.properties || {}
-            );
-            edgesAdded++;
-          } else {
-            this.logger.warn(`Skipping edge due to missing vertices`, {
-              edge: edge.type,
-              source: edge.source,
-              target: edge.target
-            });
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to add edge: ${edge.type}`, { error: getErrorMessage(error) });
-        }
-      }
+      // Load enhanced edges into graph storage
+      const edgeResult = await this.sqliteClient.batchInsertEnhancedGraphEdges(enhancedEdges);
+      this.logger.debug(`Added ${edgeResult.success} enhanced edges to SQLite graph`, {
+        failed: edgeResult.failed,
+        errors: edgeResult.errors.slice(0, 5)
+      });
 
-      this.logger.info('TinkerGraph batch load completed', {
-        verticesAdded: vertexMap.size,
-        edgesAdded,
-        edgesSkipped: edges.length - edgesAdded,
+      this.logger.info('Enhanced SQLite graph batch load completed', {
+        nodesAdded: nodeResult.success,
+        nodesFailed: nodeResult.failed,
+        edgesAdded: edgeResult.success,
+        edgesFailed: edgeResult.failed,
+        totalNodes: nodes.length,
+        totalEdges: edges.length
       });
 
       operation();
     } catch (error) {
-      this.logger.error('TinkerGraph batch load failed', { error: getErrorMessage(error) });
+      this.logger.error('Enhanced SQLite graph batch load failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
+  }
+
+  /**
+   * Generate a signature hash for duplicate detection.
+   */
+  private generateSignatureHash(node: NodeWithEmbedding): string {
+    const crypto = require('crypto');
+    const signature = `${node.type}:${node.properties.name || node.properties.fileName}:${node.properties.signature || ''}`;
+    return crypto.createHash('md5').update(signature).digest('hex');
   }
 
   /**
@@ -860,7 +834,6 @@ export class DataLoader {
     results: {
       lancedb: { success: boolean; error?: string };
       sqlite: { success: boolean; error?: string };
-      tinkergraph: { success: boolean; error?: string };
     };
   }> {
     const operation = this.logger.operation(`Loading ${nodes.length} nodes and ${edges.length} edges to all databases`);
@@ -868,11 +841,9 @@ export class DataLoader {
     const results: {
       lancedb: { success: boolean; error?: string };
       sqlite: { success: boolean; error?: string };
-      tinkergraph: { success: boolean; error?: string };
     } = {
       lancedb: { success: false },
       sqlite: { success: false },
-      tinkergraph: { success: false },
     };
 
     try {
@@ -937,24 +908,19 @@ export class DataLoader {
               this.logger.error('SQLite loading failed', { error: getErrorMessage(error) });
             })
         );
-      } else {
-        results.sqlite.error = 'Database not connected';
-      }
 
-      if (connectionStatus.tinkergraph) {
+        // Also load to SQLite graph storage (same database, different tables)
         loadingPromises.push(
           this.batchLoadToGraphDB(nodes, edges)
             .then(() => {
-              results.tinkergraph.success = true;
-              this.logger.info('TinkerGraph loading completed successfully');
+              this.logger.info('SQLite graph loading completed successfully');
             })
             .catch((error) => {
-              results.tinkergraph.error = getErrorMessage(error);
-              this.logger.error('TinkerGraph loading failed', { error: getErrorMessage(error) });
+              this.logger.error('SQLite graph loading failed', { error: getErrorMessage(error) });
             })
         );
       } else {
-        results.tinkergraph.error = 'Database not connected';
+        results.sqlite.error = 'Database not connected';
       }
 
       // Wait for all loading operations to complete
@@ -1078,24 +1044,6 @@ export class DataLoader {
             }
             break;
 
-          case 'tinkergraph':
-            if (connectionStatus.tinkergraph) {
-              retryPromises.push(
-                this.batchLoadToGraphDB(nodes, edges)
-                  .then(() => {
-                    results.tinkergraph = { success: true };
-                    this.logger.info('TinkerGraph retry successful');
-                  })
-                  .catch((error) => {
-                    results.tinkergraph = { success: false, error: getErrorMessage(error) };
-                    this.logger.error('TinkerGraph retry failed', { error: getErrorMessage(error) });
-                  })
-              );
-            } else {
-              results.tinkergraph = { success: false, error: 'Database not connected' };
-            }
-            break;
-
           default:
             this.logger.warn(`Unknown database for retry: ${dbName}`);
         }
@@ -1178,15 +1126,6 @@ export class DataLoader {
                   unhealthy.splice(unhealthy.indexOf(dbName), 1);
                 }
                 break;
-
-              case 'tinkergraph':
-                await this.connectToTinkerGraph();
-                if (this.tinkergraphClient.isConnectedToDatabase()) {
-                  recovered.push(dbName);
-                  healthy.push(dbName);
-                  unhealthy.splice(unhealthy.indexOf(dbName), 1);
-                }
-                break;
             }
           } catch (error) {
             this.logger.debug(`Recovery failed for ${dbName}`, { error: getErrorMessage(error) });
@@ -1213,12 +1152,11 @@ export class DataLoader {
 
   /**
    * Verifies database connectivity before attempting operations.
-   * @returns {Promise<{lancedb: boolean, sqlite: boolean, tinkergraph: boolean}>}
+   * @returns {Promise<{lancedb: boolean, sqlite: boolean}>}
    */
   async verifyDatabaseConnectivity(): Promise<{
     lancedb: boolean;
     sqlite: boolean;
-    tinkergraph: boolean;
   }> {
     const operation = this.logger.operation('Verifying database connectivity');
 
@@ -1226,7 +1164,6 @@ export class DataLoader {
       const connectivity = {
         lancedb: false,
         sqlite: false,
-        tinkergraph: false,
       };
 
       // Test each database connection
@@ -1241,12 +1178,6 @@ export class DataLoader {
           connectivity.sqlite = true;
         }).catch((error) => {
           this.logger.debug('SQLite connectivity check failed', { error: getErrorMessage(error) });
-        }),
-
-        this.verifyTinkerGraphConnection().then(() => {
-          connectivity.tinkergraph = true;
-        }).catch((error) => {
-          this.logger.debug('TinkerGraph connectivity check failed', { error: getErrorMessage(error) });
         }),
       ];
 
@@ -1284,16 +1215,6 @@ export class DataLoader {
   }
 
   /**
-   * Verifies TinkerGraph connection.
-   */
-  private async verifyTinkerGraphConnection(): Promise<void> {
-    if (!this.tinkergraphClient.isConnectedToDatabase()) {
-      throw new Error('TinkerGraph not connected');
-    }
-    // Additional verification could include a simple traversal
-  }
-
-  /**
    * Implements data consistency checks across databases.
    * @param {NodeWithEmbedding[]} nodes - Array of nodes to verify.
    * @returns {Promise<{consistent: boolean, issues: string[]}>}
@@ -1312,19 +1233,19 @@ export class DataLoader {
       const connectionStatus = await this.connectToDatabases();
 
       // Check node counts across databases
-      if (connectionStatus.sqlite && connectionStatus.tinkergraph) {
+      if (connectionStatus.sqlite) {
         try {
           // Get counts from SQLite
           const sqliteStats = await this.sqliteClient.getIndexingStats();
           
-          // For TinkerGraph, we would need to implement a count query
-          // This is a placeholder for the actual implementation
-          this.logger.debug('SQLite stats', sqliteStats);
+          // Get graph stats from SQLite graph tables
+          const graphStats = await this.sqliteClient.getEnhancedGraphStats();
+          this.logger.debug('SQLite stats', { sqliteStats, graphStats });
           
           // Add specific consistency checks here
-          // For example, verify that all nodes in SQLite have corresponding vertices in TinkerGraph
+          // For example, verify that all nodes in regular tables have corresponding entries in graph tables
         } catch (error) {
-          issues.push(`Failed to verify consistency between SQLite and TinkerGraph: ${getErrorMessage(error)}`);
+          issues.push(`Failed to verify SQLite consistency: ${getErrorMessage(error)}`);
         }
       }
 
@@ -1364,19 +1285,18 @@ export class DataLoader {
 
   /**
    * Gets loading statistics and database health information.
-   * @returns {Promise<{databases: Record<string, boolean>, lastLoad: Date | null, connectivity: {lancedb: boolean, sqlite: boolean, tinkergraph: boolean}}>}
+   * @returns {Promise<{databases: Record<string, boolean>, lastLoad: Date | null, connectivity: {lancedb: boolean, sqlite: boolean}}>}
    */
   async getStats(): Promise<{
     databases: Record<string, boolean>;
     lastLoad: Date | null;
-    connectivity: {lancedb: boolean, sqlite: boolean, tinkergraph: boolean};
+    connectivity: {lancedb: boolean, sqlite: boolean};
   }> {
     try {
       // Check database connectivity
       const databases = {
         lancedb: this.lancedbClient.isConnectedToDatabase(),
         sqlite: this.sqliteClient.isConnectedToDatabase(),
-        tinkergraph: this.tinkergraphClient.isConnectedToDatabase(),
       };
 
       // Verify actual connectivity

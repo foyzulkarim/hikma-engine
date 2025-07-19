@@ -277,7 +277,6 @@ export class Indexer {
     const dataLoader = new DataLoader(
       dbConfig.lancedb.path,
       dbConfig.sqlite.path,
-      dbConfig.tinkergraph.url,
       this.config
     );
 

@@ -403,6 +403,42 @@ export class SQLiteClient {
       )
     `);
 
+    // Create enhanced graph storage tables
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS graph_nodes (
+        id TEXT PRIMARY KEY,
+        business_key TEXT NOT NULL,
+        node_type TEXT NOT NULL,
+        properties TEXT NOT NULL,
+        -- Cross-cutting properties for fast queries
+        repo_id TEXT,
+        commit_sha TEXT,
+        file_path TEXT,
+        line INTEGER,
+        col INTEGER,
+        signature_hash TEXT,
+        labels TEXT, -- JSON array
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS graph_edges (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        source_business_key TEXT NOT NULL,
+        target_business_key TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        properties TEXT, -- JSON for edge properties
+        -- Common edge properties extracted for performance
+        line INTEGER,
+        col INTEGER,
+        dynamic BOOLEAN DEFAULT FALSE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Create file_imports table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS file_imports (
@@ -520,6 +556,20 @@ export class SQLiteClient {
 
     // Indexing state indexes
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_indexing_state_key ON indexing_state(key)`);
+
+    // Enhanced graph table indexes
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_nodes_business_key ON graph_nodes(business_key)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_nodes_repo ON graph_nodes(repo_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_nodes_file ON graph_nodes(file_path)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_nodes_signature ON graph_nodes(signature_hash)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(edge_type)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_source_type ON graph_edges(source_id, edge_type)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_target_type ON graph_edges(target_id, edge_type)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_business_keys ON graph_edges(source_business_key, target_business_key)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_location ON graph_edges(line, col)`);
 
     this.logger.debug('SQLite tables initialized successfully');
   }
@@ -1453,6 +1503,388 @@ export class SQLiteClient {
    */
   isConnectedToDatabase(): boolean {
     return this.isConnected;
+  }
+
+  // ============================================================================
+  // ENHANCED GRAPH DATABASE OPERATIONS
+  // ============================================================================
+
+  /**
+   * Batch insert enhanced nodes into the graph storage.
+   * @param {EnhancedBaseNode[]} nodes - Array of enhanced nodes to insert.
+   * @returns {Promise<{success: number, failed: number, errors: string[]}>} Insert results.
+   */
+  async batchInsertEnhancedGraphNodes(nodes: any[]): Promise<{success: number, failed: number, errors: string[]}> {
+    if (!this.isConnected) {
+      throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
+    }
+
+    if (!nodes || nodes.length === 0) {
+      this.logger.debug('No enhanced graph nodes to insert');
+      return { success: 0, failed: 0, errors: [] };
+    }
+
+    this.logger.info(`Starting batch insert of ${nodes.length} enhanced graph nodes`);
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO graph_nodes (
+        id, business_key, node_type, properties, repo_id, commit_sha, 
+        file_path, line, col, signature_hash, labels, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+
+    let success = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    const insertMany = this.db.transaction((nodeList: any[]) => {
+      for (const node of nodeList) {
+        try {
+          stmt.run(
+            node.id,
+            node.businessKey,
+            node.type,
+            JSON.stringify(node.properties),
+            node.repoId || null,
+            node.commitSha || null,
+            node.filePath || null,
+            node.line || null,
+            node.col || null,
+            node.signatureHash || null,
+            node.labels ? JSON.stringify(node.labels) : null
+          );
+          success++;
+        } catch (error) {
+          failed++;
+          const errorMsg = `Failed to insert enhanced graph node ${node.id}: ${getErrorMessage(error)}`;
+          errors.push(errorMsg);
+          this.logger.warn(errorMsg);
+        }
+      }
+    });
+
+    try {
+      insertMany(nodes);
+      this.logger.info(`Batch inserted enhanced graph nodes`, { success, failed, total: nodes.length });
+    } catch (error) {
+      this.logger.error('Batch enhanced graph node insert transaction failed', { error: getErrorMessage(error) });
+      throw error;
+    }
+
+    return { success, failed, errors };
+  }
+
+  /**
+   * Batch insert enhanced edges into the graph storage.
+   * @param {EnhancedEdge[]} edges - Array of enhanced edges to insert.
+   * @returns {Promise<{success: number, failed: number, errors: string[]}>} Insert results.
+   */
+  async batchInsertEnhancedGraphEdges(edges: any[]): Promise<{success: number, failed: number, errors: string[]}> {
+    if (!this.isConnected) {
+      throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
+    }
+
+    if (!edges || edges.length === 0) {
+      this.logger.debug('No enhanced graph edges to insert');
+      return { success: 0, failed: 0, errors: [] };
+    }
+
+    this.logger.info(`Starting batch insert of ${edges.length} enhanced graph edges`);
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO graph_edges (
+        id, source_id, target_id, source_business_key, target_business_key,
+        edge_type, properties, line, col, dynamic, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+
+    let success = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    const insertMany = this.db.transaction((edgeList: any[]) => {
+      for (const edge of edgeList) {
+        try {
+          const edgeId = `${edge.sourceBusinessKey}-${edge.type}-${edge.targetBusinessKey}`;
+          stmt.run(
+            edgeId,
+            edge.source,
+            edge.target,
+            edge.sourceBusinessKey,
+            edge.targetBusinessKey,
+            edge.type,
+            edge.properties ? JSON.stringify(edge.properties) : null,
+            edge.line || null,
+            edge.col || null,
+            edge.dynamic ? 1 : 0
+          );
+          success++;
+        } catch (error) {
+          failed++;
+          const errorMsg = `Failed to insert enhanced graph edge ${edge.sourceBusinessKey}->${edge.targetBusinessKey}: ${getErrorMessage(error)}`;
+          errors.push(errorMsg);
+          this.logger.warn(errorMsg);
+        }
+      }
+    });
+
+    try {
+      insertMany(edges);
+      this.logger.info(`Batch inserted enhanced graph edges`, { success, failed, total: edges.length });
+    } catch (error) {
+      this.logger.error('Batch enhanced graph edge insert transaction failed', { error: getErrorMessage(error) });
+      throw error;
+    }
+
+    return { success, failed, errors };
+  }
+
+  /**
+   * Find nodes by business key pattern.
+   * @param {string} pattern - Business key pattern (supports LIKE syntax).
+   * @returns {any[]} Array of matching nodes.
+   */
+  findNodesByBusinessKey(pattern: string): any[] {
+    if (!this.isConnected) {
+      throw new Error('Not connected to SQLite. Call connect() first.');
+    }
+
+    const sql = `
+      SELECT id, business_key, node_type, properties, repo_id, commit_sha, 
+             file_path, line, col, signature_hash, labels
+      FROM graph_nodes 
+      WHERE business_key LIKE ?
+    `;
+
+    const results = this.all(sql, [pattern]);
+    return results.map(row => ({
+      id: row.id,
+      businessKey: row.business_key,
+      type: row.node_type,
+      properties: JSON.parse(row.properties),
+      repoId: row.repo_id,
+      commitSha: row.commit_sha,
+      filePath: row.file_path,
+      line: row.line,
+      col: row.col,
+      signatureHash: row.signature_hash,
+      labels: row.labels ? JSON.parse(row.labels) : []
+    }));
+  }
+
+  /**
+   * Find all functions that a specific function calls (with location info).
+   * @param {string} functionBusinessKey - The function business key.
+   * @returns {any[]} Array of called functions with call locations.
+   */
+  findFunctionCallsWithLocation(functionBusinessKey: string): any[] {
+    if (!this.isConnected) {
+      throw new Error('Not connected to SQLite. Call connect() first.');
+    }
+
+    const sql = `
+      SELECT n.business_key, n.properties, e.line, e.col, e.dynamic, e.properties as edge_props
+      FROM graph_nodes n
+      JOIN graph_edges e ON n.business_key = e.target_business_key
+      WHERE e.source_business_key = ? AND e.edge_type = 'CALLS'
+      ORDER BY e.line, e.col
+    `;
+
+    const results = this.all(sql, [functionBusinessKey]);
+    return results.map(row => ({
+      businessKey: row.business_key,
+      properties: JSON.parse(row.properties),
+      callLocation: {
+        line: row.line,
+        col: row.col,
+        dynamic: row.dynamic === 1
+      },
+      edgeProperties: row.edge_props ? JSON.parse(row.edge_props) : {}
+    }));
+  }
+
+  /**
+   * Find all variables that a function reads or writes.
+   * @param {string} functionBusinessKey - The function business key.
+   * @param {'READS' | 'WRITES'} accessType - Type of variable access.
+   * @returns {any[]} Array of variables with access locations.
+   */
+  findVariableAccess(functionBusinessKey: string, accessType: 'READS' | 'WRITES'): any[] {
+    if (!this.isConnected) {
+      throw new Error('Not connected to SQLite. Call connect() first.');
+    }
+
+    const sql = `
+      SELECT n.business_key, n.properties, e.line, e.col, e.properties as edge_props
+      FROM graph_nodes n
+      JOIN graph_edges e ON n.business_key = e.target_business_key
+      WHERE e.source_business_key = ? AND e.edge_type = ?
+      ORDER BY e.line, e.col
+    `;
+
+    const results = this.all(sql, [functionBusinessKey, accessType]);
+    return results.map(row => ({
+      businessKey: row.business_key,
+      properties: JSON.parse(row.properties),
+      accessLocation: {
+        line: row.line,
+        col: row.col
+      },
+      edgeProperties: row.edge_props ? JSON.parse(row.edge_props) : {}
+    }));
+  }
+
+  /**
+   * Find all functions in a file with their declarations.
+   * @param {string} fileBusinessKey - The file business key.
+   * @returns {any[]} Array of functions declared in the file.
+   */
+  findFunctionsInFileEnhanced(fileBusinessKey: string): any[] {
+    if (!this.isConnected) {
+      throw new Error('Not connected to SQLite. Call connect() first.');
+    }
+
+    const sql = `
+      SELECT n.business_key, n.properties, n.line, n.col
+      FROM graph_nodes n
+      JOIN graph_edges e ON n.business_key = e.source_business_key
+      WHERE e.target_business_key = ? AND e.edge_type = 'DECLARES' 
+        AND n.node_type IN ('Function', 'ArrowFunction')
+      ORDER BY n.line
+    `;
+
+    const results = this.all(sql, [fileBusinessKey]);
+    return results.map(row => ({
+      businessKey: row.business_key,
+      properties: JSON.parse(row.properties),
+      location: {
+        line: row.line,
+        col: row.col
+      }
+    }));
+  }
+
+  /**
+   * Find data flow: trace how data flows from one variable to another.
+   * @param {string} sourceVarBusinessKey - Source variable business key.
+   * @param {number} maxDepth - Maximum depth to trace (default: 3).
+   * @returns {any[]} Array representing the data flow path.
+   */
+  findDataFlow(sourceVarBusinessKey: string, maxDepth: number = 3): any[] {
+    if (!this.isConnected) {
+      throw new Error('Not connected to SQLite. Call connect() first.');
+    }
+
+    // Recursive CTE to find data flow paths
+    const sql = `
+      WITH RECURSIVE data_flow(source_key, target_key, path, depth) AS (
+        -- Base case: direct reads/writes
+        SELECT e.source_business_key, e.target_business_key, 
+               e.source_business_key || ' -> ' || e.target_business_key, 1
+        FROM graph_edges e
+        WHERE e.target_business_key = ? AND e.edge_type IN ('READS', 'WRITES')
+        
+        UNION ALL
+        
+        -- Recursive case: follow function calls
+        SELECT df.source_key, e.target_business_key,
+               df.path || ' -> ' || e.target_business_key, df.depth + 1
+        FROM data_flow df
+        JOIN graph_edges e ON df.source_key = e.source_business_key
+        WHERE e.edge_type = 'CALLS' AND df.depth < ?
+      )
+      SELECT DISTINCT source_key, target_key, path, depth
+      FROM data_flow
+      ORDER BY depth, path
+    `;
+
+    const results = this.all(sql, [sourceVarBusinessKey, maxDepth]);
+    return results;
+  }
+
+  /**
+   * Get enhanced graph statistics with detailed breakdowns.
+   * @returns {Promise<EnhancedGraphStats>} Comprehensive graph statistics.
+   */
+  async getEnhancedGraphStats(): Promise<{
+    nodeCount: number;
+    edgeCount: number;
+    nodeTypes: Record<string, number>;
+    edgeTypes: Record<string, number>;
+    repoBreakdown: Record<string, number>;
+    fileLanguages: Record<string, number>;
+    functionComplexity: {
+      avgLoc: number;
+      maxLoc: number;
+      totalFunctions: number;
+    };
+  }> {
+    try {
+      const nodeCount = (this.db.prepare('SELECT COUNT(*) as count FROM graph_nodes').get() as { count: number } | undefined)?.count || 0;
+      const edgeCount = (this.db.prepare('SELECT COUNT(*) as count FROM graph_edges').get() as { count: number } | undefined)?.count || 0;
+
+      // Node type distribution
+      const nodeTypeResults = this.db.prepare('SELECT node_type, COUNT(*) as count FROM graph_nodes GROUP BY node_type').all() as Array<{node_type: string, count: number}>;
+      const nodeTypes: Record<string, number> = {};
+      nodeTypeResults.forEach(row => {
+        nodeTypes[row.node_type] = row.count;
+      });
+
+      // Edge type distribution
+      const edgeTypeResults = this.db.prepare('SELECT edge_type, COUNT(*) as count FROM graph_edges GROUP BY edge_type').all() as Array<{edge_type: string, count: number}>;
+      const edgeTypes: Record<string, number> = {};
+      edgeTypeResults.forEach(row => {
+        edgeTypes[row.edge_type] = row.count;
+      });
+
+      // Repository breakdown
+      const repoResults = this.db.prepare('SELECT repo_id, COUNT(*) as count FROM graph_nodes WHERE repo_id IS NOT NULL GROUP BY repo_id').all() as Array<{repo_id: string, count: number}>;
+      const repoBreakdown: Record<string, number> = {};
+      repoResults.forEach(row => {
+        repoBreakdown[row.repo_id] = row.count;
+      });
+
+      // File language distribution
+      const langResults = this.db.prepare(`
+        SELECT JSON_EXTRACT(properties, '$.language') as language, COUNT(*) as count 
+        FROM graph_nodes 
+        WHERE node_type = 'File' AND JSON_EXTRACT(properties, '$.language') IS NOT NULL
+        GROUP BY JSON_EXTRACT(properties, '$.language')
+      `).all() as Array<{language: string, count: number}>;
+      const fileLanguages: Record<string, number> = {};
+      langResults.forEach(row => {
+        fileLanguages[row.language] = row.count;
+      });
+
+      // Function complexity stats
+      const funcStats = this.db.prepare(`
+        SELECT 
+          AVG(JSON_EXTRACT(properties, '$.loc')) as avg_loc,
+          MAX(JSON_EXTRACT(properties, '$.loc')) as max_loc,
+          COUNT(*) as total_functions
+        FROM graph_nodes 
+        WHERE node_type IN ('Function', 'ArrowFunction')
+      `).get() as {avg_loc: number, max_loc: number, total_functions: number} | undefined;
+
+      const functionComplexity = {
+        avgLoc: funcStats?.avg_loc || 0,
+        maxLoc: funcStats?.max_loc || 0,
+        totalFunctions: funcStats?.total_functions || 0
+      };
+
+      return {
+        nodeCount,
+        edgeCount,
+        nodeTypes,
+        edgeTypes,
+        repoBreakdown,
+        fileLanguages,
+        functionComplexity
+      };
+    } catch (error) {
+      this.logger.error('Failed to get enhanced graph stats', { error: getErrorMessage(error) });
+      throw error;
+    }
   }
 
   /**
