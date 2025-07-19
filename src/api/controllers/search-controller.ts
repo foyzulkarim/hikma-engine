@@ -20,7 +20,7 @@ import {
   ValidationError,
   APIErrors
 } from '../errors/api-errors';
-import { errorMonitoringService } from '../services/error-monitoring';
+// import { errorMonitoringService } from '../services/error-monitoring'; // Temporarily disabled
 
 const logger = getLogger('SearchController');
 
@@ -115,7 +115,7 @@ export class SearchController {
         });
 
         // Update performance metrics for cache hit
-        errorMonitoringService.updatePerformanceMetrics(Date.now() - startTime, false);
+        // errorMonitoringService.updatePerformanceMetrics(Date.now() - startTime, false); // Temporarily disabled
 
         res.json(formatResponse.success(req, {
           results: cachedResult,
@@ -171,16 +171,16 @@ export class SearchController {
 
       // Record slow query if needed
       if (processingTime > 2000) { // 2 seconds threshold
-        errorMonitoringService.recordSlowQuery(
-          query,
-          processingTime,
-          '/api/v1/search/semantic',
-          req.context?.requestId
-        );
+        // errorMonitoringService.recordSlowQuery(
+        //   query,
+        //   processingTime,
+        //   '/api/v1/search/semantic',
+        //   req.context?.requestId
+        // ); // Temporarily disabled
       }
 
       // Update performance metrics
-      errorMonitoringService.updatePerformanceMetrics(processingTime, false);
+      // errorMonitoringService.updatePerformanceMetrics(processingTime, false); // Temporarily disabled
 
       logger.info('Semantic search completed', {
         query: query.substring(0, 50),

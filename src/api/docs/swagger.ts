@@ -47,7 +47,7 @@ const swaggerOptions: swaggerJsdoc.Options = {
 };
 
 // Generate OpenAPI specification
-const specs = swaggerJsdoc(swaggerOptions);
+const specs:any = swaggerJsdoc(swaggerOptions);
 
 // Custom CSS for Swagger UI
 const customCss = `
@@ -194,20 +194,20 @@ export function validateOpenApiSpec(): { valid: boolean; errors: string[] } {
 
   try {
     // Basic validation
-    if (!specs.openapi) {
+    if (!(specs as any).openapi) {
       errors.push('Missing openapi version');
     }
 
-    if (!specs.info || !specs.info.title || !specs.info.version) {
+    if (!(specs as any).info || !(specs as any).info.title || !(specs as any).info.version) {
       errors.push('Missing required info fields (title, version)');
     }
 
-    if (!specs.paths || Object.keys(specs.paths).length === 0) {
+    if (!(specs as any).paths || Object.keys((specs as any).paths).length === 0) {
       errors.push('No paths defined');
     }
 
     // Validate paths
-    for (const [path, methods] of Object.entries(specs.paths)) {
+    for (const [path, methods] of Object.entries((specs as any).paths)) {
       if (typeof methods !== 'object') {
         errors.push(`Invalid path definition: ${path}`);
         continue;

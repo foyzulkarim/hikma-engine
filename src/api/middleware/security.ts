@@ -61,7 +61,7 @@ export function preventPathTraversal(req: Request, res: Response, next: NextFunc
   if (req.query) {
     for (const [key, value] of Object.entries(req.query)) {
       if (typeof value === 'string' && checkValue(value)) {
-        throw APIErrors.validation(`Path traversal attempt detected in parameter: ${key}`);
+        throw APIErrors.validation.invalid(key, value, 'Path traversal attempt detected');
       }
     }
   }
@@ -73,7 +73,7 @@ export function preventPathTraversal(req: Request, res: Response, next: NextFunc
         const currentPath = path ? `${path}.${key}` : key;
         
         if (typeof value === 'string' && checkValue(value)) {
-          throw APIErrors.validation(`Path traversal attempt detected in: ${currentPath}`);
+          throw APIErrors.validation.invalid(currentPath, value, 'Path traversal attempt detected');
         } else if (typeof value === 'object' && value !== null) {
           checkObjectForPathTraversal(value, currentPath);
         }
@@ -104,7 +104,7 @@ export function preventSQLInjection(req: Request, res: Response, next: NextFunct
   if (req.query) {
     for (const [key, value] of Object.entries(req.query)) {
       if (typeof value === 'string' && checkForSQLInjection(value)) {
-        throw APIErrors.validation(`Potential SQL injection detected in parameter: ${key}`);
+        throw APIErrors.validation.invalid(key, value, 'Potential SQL injection detected');
       }
     }
   }
@@ -116,7 +116,7 @@ export function preventSQLInjection(req: Request, res: Response, next: NextFunct
         const currentPath = path ? `${path}.${key}` : key;
         
         if (typeof value === 'string' && checkForSQLInjection(value)) {
-          throw APIErrors.validation(`Potential SQL injection detected in: ${currentPath}`);
+          throw APIErrors.validation.invalid(currentPath, value, 'Potential SQL injection detected');
         } else if (typeof value === 'object' && value !== null) {
           checkObjectForSQL(value, currentPath);
         }
@@ -139,7 +139,7 @@ export function limitRequestSize(maxSize: string = '10mb') {
       const maxSizeInBytes = parseSize(maxSize);
       
       if (sizeInBytes > maxSizeInBytes) {
-        throw APIErrors.validation(`Request size ${contentLength} exceeds maximum allowed size ${maxSize}`);
+        throw APIErrors.validation.invalid('Content-Length', contentLength, `exceeds maximum allowed size ${maxSize}`);
       }
     }
 

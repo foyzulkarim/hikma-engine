@@ -26,7 +26,7 @@ export class AuthenticationService {
 
   public validateApiKey(apiKey: string): boolean {
     const securityConfig = apiConfig.getSecurityConfig();
-    
+
     if (!securityConfig.apiKey.enabled) {
       return true; // API key authentication is disabled
     }
@@ -38,9 +38,13 @@ export class AuthenticationService {
     return securityConfig.apiKey.keys.includes(apiKey);
   }
 
-  public validateJWT(token: string): { valid: boolean; payload?: any; error?: string } {
+  public validateJWT(token: string): {
+    valid: boolean;
+    payload?: any;
+    error?: string;
+  } {
     const securityConfig = apiConfig.getSecurityConfig();
-    
+
     if (!securityConfig.jwt.enabled) {
       return { valid: true }; // JWT authentication is disabled
     }
@@ -57,7 +61,7 @@ export class AuthenticationService {
       const payload = jwt.verify(token, securityConfig.jwt.secret, {
         algorithms: [securityConfig.jwt.algorithm as jwt.Algorithm],
       });
-      
+
       return { valid: true, payload };
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
@@ -72,15 +76,13 @@ export class AuthenticationService {
 
   public generateJWT(payload: object): string {
     const securityConfig = apiConfig.getSecurityConfig();
-    
+
     if (!securityConfig.jwt.secret) {
       throw new Error('JWT secret not configured');
     }
-
-    return jwt.sign(payload, securityConfig.jwt.secret, {
+    return jwt.sign(payload, securityConfig.jwt.secret as string, {
       expiresIn: securityConfig.jwt.expiresIn,
-      algorithm: securityConfig.jwt.algorithm as jwt.Algorithm,
-    });
+    } as jwt.SignOptions);
   }
 
   public extractTokenFromHeader(authHeader: string): string | null {
@@ -100,18 +102,25 @@ export class AuthenticationService {
 export const authService = AuthenticationService.getInstance();
 
 // API Key Authentication Middleware
-export function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export function apiKeyAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const securityConfig = apiConfig.getSecurityConfig();
-  
+
   if (!securityConfig.apiKey.enabled) {
     return next(); // API key authentication is disabled
   }
 
-  const apiKey = req.header(securityConfig.apiKey.header);
-  
-  if (!apiKey) {
+  const apiKeyValue = req.header(securityConfig.apiKey.header);
+
+  if (!apiKeyValue) {
     throw APIErrors.authentication('API key is required');
   }
+
+  // Handle string array case (when multiple headers with same name)
+  const apiKey = Array.isArray(apiKeyValue) ? apiKeyValue[0] : apiKeyValue;
 
   if (!authService.validateApiKey(apiKey)) {
     throw APIErrors.authentication('Invalid API key');
@@ -122,22 +131,26 @@ export function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextF
 }
 
 // JWT Authentication Middleware
-export function jwtAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export function jwtAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const securityConfig = apiConfig.getSecurityConfig();
-  
+
   if (!securityConfig.jwt.enabled) {
     return next(); // JWT authentication is disabled
   }
 
   const authHeader = req.header('Authorization');
   const token = authService.extractTokenFromHeader(authHeader || '');
-  
+
   if (!token) {
     throw APIErrors.authentication('JWT token is required');
   }
 
   const validation = authService.validateJWT(token);
-  
+
   if (!validation.valid) {
     throw APIErrors.authentication(validation.error || 'Invalid token');
   }
@@ -147,9 +160,13 @@ export function jwtAuth(req: AuthenticatedRequest, res: Response, next: NextFunc
 }
 
 // Combined Authentication Middleware (API Key OR JWT)
-export function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export function authenticate(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const securityConfig = apiConfig.getSecurityConfig();
-  
+
   // If neither authentication method is enabled, allow access
   if (!securityConfig.apiKey.enabled && !securityConfig.jwt.enabled) {
     return next();
@@ -160,7 +177,8 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
 
   // Try API Key authentication first
   if (securityConfig.apiKey.enabled) {
-    const apiKey = req.header(securityConfig.apiKey.header);
+    const apiKeyValue = req.header(securityConfig.apiKey.header);
+    const apiKey = Array.isArray(apiKeyValue) ? apiKeyValue[0] : apiKeyValue;
     if (apiKey && authService.validateApiKey(apiKey)) {
       req.apiKey = apiKey;
       authenticated = true;
@@ -173,7 +191,7 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
   if (!authenticated && securityConfig.jwt.enabled) {
     const authHeader = req.header('Authorization');
     const token = authService.extractTokenFromHeader(authHeader || '');
-    
+
     if (token) {
       const validation = authService.validateJWT(token);
       if (validation.valid) {
@@ -195,7 +213,11 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
 
 // Role-based Authorization Middleware
 export function authorize(requiredRoles: string[] = []) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
     if (requiredRoles.length === 0) {
       return next(); // No specific roles required
     }
@@ -206,7 +228,9 @@ export function authorize(requiredRoles: string[] = []) {
 
     const userRole = req.user.role;
     if (!userRole || !requiredRoles.includes(userRole)) {
-      throw APIErrors.authorization(`Access denied. Required roles: ${requiredRoles.join(', ')}`);
+      throw APIErrors.authorization(
+        `Access denied. Required roles: ${requiredRoles.join(', ')}`
+      );
     }
 
     next();
@@ -215,7 +239,11 @@ export function authorize(requiredRoles: string[] = []) {
 
 // Permission-based Authorization Middleware
 export function requirePermissions(requiredPermissions: string[] = []) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
     if (requiredPermissions.length === 0) {
       return next(); // No specific permissions required
     }
@@ -225,12 +253,14 @@ export function requirePermissions(requiredPermissions: string[] = []) {
     }
 
     const userPermissions = req.user.permissions;
-    const hasAllPermissions = requiredPermissions.every(permission => 
+    const hasAllPermissions = requiredPermissions.every((permission) =>
       userPermissions.includes(permission)
     );
 
     if (!hasAllPermissions) {
-      throw APIErrors.authorization(`Access denied. Required permissions: ${requiredPermissions.join(', ')}`);
+      throw APIErrors.authorization(
+        `Access denied. Required permissions: ${requiredPermissions.join(', ')}`
+      );
     }
 
     next();
@@ -238,12 +268,17 @@ export function requirePermissions(requiredPermissions: string[] = []) {
 }
 
 // Optional Authentication Middleware (doesn't throw errors)
-export function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+export function optionalAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const securityConfig = apiConfig.getSecurityConfig();
-  
+
   // Try API Key authentication
   if (securityConfig.apiKey.enabled) {
-    const apiKey = req.header(securityConfig.apiKey.header);
+    const apiKeyValue = req.header(securityConfig.apiKey.header);
+    const apiKey = Array.isArray(apiKeyValue) ? apiKeyValue[0] : apiKeyValue;
     if (apiKey && authService.validateApiKey(apiKey)) {
       req.apiKey = apiKey;
       return next();
@@ -254,7 +289,7 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
   if (securityConfig.jwt.enabled) {
     const authHeader = req.header('Authorization');
     const token = authService.extractTokenFromHeader(authHeader || '');
-    
+
     if (token) {
       const validation = authService.validateJWT(token);
       if (validation.valid) {
@@ -269,8 +304,12 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
 // Rate limiting per authenticated user
 export function createUserRateLimit() {
   const rateLimitConfig = apiConfig.getRateLimitConfig();
-  
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+
+  return (
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
+  ): void => {
     // This would integrate with a rate limiting service
     // For now, we'll just pass through
     // In a real implementation, you'd track requests per user/API key

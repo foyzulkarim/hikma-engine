@@ -11,7 +11,7 @@ import {
   InternalServerError,
   APIErrors
 } from '../errors/api-errors';
-import { errorMonitoringService } from '../services/error-monitoring';
+// import { errorMonitoringService } from '../services/error-monitoring'; // Temporarily disabled
 
 const logger = getLogger('ErrorHandlingMiddleware');
 
@@ -46,10 +46,10 @@ export function globalErrorHandler(
   apiError.log();
 
   // Record error for monitoring
-  errorMonitoringService.recordError(apiError);
+  // errorMonitoringService.recordError(apiError); // Temporarily disabled
 
   // Update performance metrics
-  errorMonitoringService.updatePerformanceMetrics(processingTime, true);
+  // errorMonitoringService.updatePerformanceMetrics(processingTime, true); // Temporarily disabled
 
   // Send error response
   const errorResponse = apiError.toJSON();

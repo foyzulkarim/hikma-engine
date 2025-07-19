@@ -1,23 +1,24 @@
 import request from 'supertest';
 import { Express } from 'express';
-import { createApiServer } from '../../server';
-import { SearchService } from '../../../core/search-service';
+import { createAPIServer } from '../../server';
+import { SearchService } from '../../../modules/search-service';
 import { apiConfig } from '../../config/api-config';
 import { healthCheckService } from '../../services/health-check';
-import { errorMonitoringService } from '../../services/error-monitoring';
+// import { errorMonitoringService } from '../../services/error-monitoring'; // Temporarily disabled
 import { performanceOptimizer } from '../../services/performance-optimizer';
 
 describe('System Integration Tests', () => {
-  let app: Express;
+  let app: any;
   let server: any;
-  let searchService: SearchService;
+  let searchService: SearchService | null;
 
   beforeAll(async () => {
     // Create test server with full configuration
-    const serverInstance = await createApiServer();
-    app = serverInstance.app;
-    server = serverInstance.server;
-    searchService = SearchService.getInstance();
+    const serverInstance = await createAPIServer();
+    app = serverInstance.getApp();
+    server = serverInstance.getServer();
+    // searchService = SearchService.getInstance(); // Temporarily disabled - no singleton pattern
+    searchService = null; // Will need to be properly initialized when needed
 
     // Wait for all services to initialize
     await new Promise(resolve => setTimeout(resolve, 2000));

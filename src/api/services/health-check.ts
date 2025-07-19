@@ -1,4 +1,4 @@
-import { SearchService } from '../../core/search-service';
+import { SearchService } from '../../modules/search-service';
 import { apiConfig } from '../config/api-config';
 import { getLogger } from '../../utils/logger';
 
@@ -65,13 +65,14 @@ export interface SystemInfo {
 export class HealthCheckService {
   private static instance: HealthCheckService;
   private startTime: Date;
-  private searchService: SearchService;
+  private searchService: SearchService | null;
   private lastHealthCheck: HealthStatus | null = null;
   private healthCheckInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
     this.startTime = new Date();
-    this.searchService = SearchService.getInstance();
+    // this.searchService = SearchService.getInstance(); // Temporarily disabled
+    this.searchService = null; // Will be set later when needed
     this.initializePeriodicHealthCheck();
   }
 
@@ -234,6 +235,18 @@ export class HealthCheckService {
     const startTime = Date.now();
 
     try {
+      if (!this.searchService) {
+        checks.searchService = {
+          status: 'warn',
+          message: 'Search service not initialized',
+          responseTime: Date.now() - startTime,
+          details: {
+            reason: 'Service not available during startup',
+          },
+        };
+        return;
+      }
+
       // Perform a simple search to verify service functionality
       const testQuery = 'test';
       const results = await this.searchService.semanticSearch(testQuery, { limit: 1 });

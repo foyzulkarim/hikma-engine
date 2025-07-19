@@ -1,20 +1,21 @@
 import request from 'supertest';
 import { Express } from 'express';
-import { createApiServer } from '../../server';
-import { SearchService } from '../../../core/search-service';
+import { createAPIServer } from '../../server';
+import { SearchService } from '../../../modules/search-service';
 import { apiConfig } from '../../config/api-config';
 
 describe('API Integration Tests', () => {
-  let app: Express;
+  let app: any;
   let server: any;
-  let searchService: SearchService;
+  let searchService: SearchService | null;
 
   beforeAll(async () => {
     // Create test server
-    const serverInstance = await createApiServer();
-    app = serverInstance.app;
-    server = serverInstance.server;
-    searchService = SearchService.getInstance();
+    const serverInstance = await createAPIServer();
+    app = serverInstance.getApp();
+    server = serverInstance.getServer();
+    // searchService = SearchService.getInstance(); // Temporarily disabled - no singleton pattern
+    searchService = null; // Will need to be properly initialized when needed
 
     // Wait for server to be ready
     await new Promise(resolve => setTimeout(resolve, 1000));

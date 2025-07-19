@@ -305,6 +305,13 @@ export class APIServer {
   public getApp(): Application {
     return this.app;
   }
+
+  /**
+   * Gets the HTTP server instance.
+   */
+  public getServer(): any {
+    return this.server;
+  }
 }
 
 /**

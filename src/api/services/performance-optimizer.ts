@@ -294,11 +294,15 @@ export class PerformanceOptimizer {
         const targetSize = Math.floor(currentSize * 0.7); // Reduce by 30%
         
         if (currentSize > targetSize) {
-          // LRU cache will automatically evict oldest items
-          cache.max = targetSize;
+          // Clear some entries to reduce memory usage
+          const entriesToRemove = currentSize - targetSize;
+          const keys = Array.from(cache.keys());
+          for (let i = 0; i < entriesToRemove && keys.length > 0; i++) {
+            cache.delete(keys[i]);
+          }
           logger.info(`Reduced cache size for ${type}`, {
             from: currentSize,
-            to: targetSize,
+            to: cache.size,
           });
         }
       }

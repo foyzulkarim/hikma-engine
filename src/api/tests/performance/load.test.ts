@@ -1,15 +1,15 @@
 import request from 'supertest';
 import { Express } from 'express';
-import { createApiServer } from '../../server';
+import { createAPIServer } from '../../server';
 
 describe('Performance and Load Tests', () => {
-  let app: Express;
+  let app: any;
   let server: any;
 
   beforeAll(async () => {
-    const serverInstance = await createApiServer();
-    app = serverInstance.app;
-    server = serverInstance.server;
+    const serverInstance = await createAPIServer();
+    app = serverInstance.getApp();
+    server = serverInstance.getServer();
     
     // Wait for server to be ready
     await new Promise(resolve => setTimeout(resolve, 1000));
