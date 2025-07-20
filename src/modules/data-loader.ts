@@ -318,14 +318,30 @@ export class DataLoader {
       // Group nodes by type for efficient processing
       const nodesByType = this.groupNodesByType(nodes);
 
-      // Process each node type
-      for (const [nodeType, typeNodes] of Object.entries(nodesByType)) {
-        if (typeNodes.length === 0) continue;
+      // Process node types in dependency order to avoid foreign key constraint failures
+      const processingOrder = [
+        'RepositoryNode',   // Must be first - other nodes reference repositories
+        'DirectoryNode',    // Must come before files
+        'FileNode',         // Must come before functions
+        'FunctionNode',     // Depends on FileNode
+        'CommitNode',
+        'CodeNode',
+        'TestNode',
+        'PullRequestNode'
+      ];
+
+      // Process each node type in the correct order
+      for (const nodeType of processingOrder) {
+        const typeNodes = nodesByType[nodeType];
+        if (!typeNodes || typeNodes.length === 0) continue;
 
         this.logger.debug(`Loading ${typeNodes.length} ${nodeType} nodes with embeddings to SQLite`);
 
         try {
           switch (nodeType) {
+            case 'RepositoryNode':
+              await this.loadRepositoryNodesWithVectors(typeNodes.filter(n => n.type === 'RepositoryNode'));
+              break;
             case 'FileNode':
               await this.loadFileNodesWithVectors(typeNodes.filter(n => n.type === 'FileNode'));
               break;
@@ -504,6 +520,21 @@ export class DataLoader {
     }));
 
     await this.sqliteClient.batchInsertPullRequests(prData);
+  }
+
+  /**
+   * Loads repository nodes.
+   */
+  private async loadRepositoryNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const repoData = nodes.map(node => ({
+      id: node.id,
+      repoPath: node.properties.repoPath,
+      repoName: node.properties.repoName,
+      createdAt: node.properties.createdAt,
+      lastUpdated: node.properties.lastUpdated
+    }));
+
+    await this.sqliteClient.batchInsertRepositories(repoData);
   }
 
   /**

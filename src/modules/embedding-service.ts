@@ -3,11 +3,11 @@
  *       These embeddings enable semantic similarity searches and clustering of code elements.
  */
 
-import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, DirectoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
+import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, DirectoryNode, RepositoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
-// import { pipeline, env } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 
 /**
  * Generates vector embeddings for knowledge graph nodes.
@@ -25,6 +25,8 @@ export class EmbeddingService {
   constructor(config: ConfigManager) {
     this.config = config;
     this.logger.info('Initializing EmbeddingService');
+    // Set environment for transformers
+    env.allowLocalModels = false;
   }
 
   /**
@@ -45,17 +47,8 @@ export class EmbeddingService {
         batchSize: aiConfig.embedding.batchSize 
       });
       
-      // TODO: Implement actual model loading
-      // Example for @xenova/transformers:
-      // env.allowLocalModels = false;
-      // this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
-      
-      // Mock implementation for now
-      this.model = {
-        model: aiConfig.embedding.model,
-        batchSize: aiConfig.embedding.batchSize,
-        dimensions: 384, // Typical for all-MiniLM-L6-v2
-      };
+      // Load the transformers pipeline for feature extraction (embeddings)
+      this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
       
       this.isModelLoaded = true;
       this.logger.info('Embedding model loaded successfully');
@@ -102,6 +95,16 @@ export class EmbeddingService {
         const parts = [
           dirNode.properties.dirName,
           dirNode.properties.aiSummary || '',
+        ].filter(part => part.trim() !== '');
+        
+        return parts.join(' ');
+      }
+      
+      case 'RepositoryNode': {
+        const repoNode = node as RepositoryNode;
+        const parts = [
+          repoNode.properties.repoName,
+          repoNode.properties.repoPath,
         ].filter(part => part.trim() !== '');
         
         return parts.join(' ');
@@ -156,23 +159,38 @@ export class EmbeddingService {
     }
 
     try {
-      // TODO: Implement actual embedding generation
-      // Example for @xenova/transformers:
-      // const result = await this.model(text);
-      // return Array.from(result.data);
+      this.logger.debug('Generating embedding', { 
+        textLength: text.length 
+      });
 
-      // Mock implementation - generate a random embedding vector
-      const dimensions = this.model.dimensions || 384;
-      const embedding = Array.from({ length: dimensions }, () => Math.random() - 0.5);
+      // Use transformers pipeline to generate embeddings
+      const result = await this.model(text);
       
-      // Normalize the vector (optional but often beneficial)
+      // Extract the embedding vector from the result
+      // The result is typically nested: result.data contains the flat array
+      let embedding: number[];
+      if (result.data) {
+        embedding = Array.from(result.data);
+      } else if (Array.isArray(result)) {
+        // Some models might return the array directly
+        embedding = result.flat();
+      } else {
+        throw new Error('Unexpected embedding result format');
+      }
+      
+      // Normalize the vector (beneficial for cosine similarity)
       const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-      return embedding.map(val => val / magnitude);
+      if (magnitude > 0) {
+        embedding = embedding.map(val => val / magnitude);
+      }
       
+      return embedding;
+        
     } catch (error) {
       this.logger.warn('Failed to generate embedding, using zero vector', { error: getErrorMessage(error) });
-      const dimensions = this.model?.dimensions || 384;
-      return new Array(dimensions).fill(0);
+      // Fallback to a default size (typical for all-MiniLM-L6-v2)
+      const defaultDimensions = 384;
+      return new Array(defaultDimensions).fill(0);
     }
   }
 
@@ -350,10 +368,23 @@ export class EmbeddingService {
   }> {
     const aiConfig = this.config.getAIConfig();
     
+    // Determine dimensions based on the model name
+    // Most common embedding models and their dimensions
+    const modelDimensions: Record<string, number> = {
+      'Xenova/all-MiniLM-L6-v2': 384,
+      'Xenova/all-mpnet-base-v2': 768,
+      'Xenova/distilbert-base-uncased': 768,
+      'sentence-transformers/all-MiniLM-L6-v2': 384,
+      'sentence-transformers/all-mpnet-base-v2': 768,
+    };
+    
+    const modelName = aiConfig.embedding.model;
+    const dimensions = modelDimensions[modelName] || 384; // Default to 384 if unknown
+    
     return {
       modelLoaded: this.isModelLoaded,
-      model: aiConfig.embedding.model,
-      dimensions: this.model?.dimensions || 0,
+      model: modelName,
+      dimensions,
     };
   }
 }
