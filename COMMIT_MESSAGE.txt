@@ -1,0 +1,85 @@
+feat: migrate to unified SQLite architecture with sqlite-vec extension
+
+BREAKING CHANGE: Replace dual-database architecture (SQLite + LanceDB) with unified SQLite + sqlite-vec extension
+
+## Major Changes
+
+### Architecture Migration
+- **Unified Database**: Single SQLite database with vector extension support
+- **Remove LanceDB**: Complete removal of @lancedb/lancedb dependency
+- **Add sqlite-vec**: Integration of sqlite-vec extension for vector operations
+- **Simplified Persistence**: Single database file for all data types (metadata, graph, vectors)
+
+### Database Schema Enhancements
+- Add vector embedding BLOB columns to all major tables:
+  - `files.content_embedding` - File content embeddings
+  - `functions.signature_embedding` & `functions.body_embedding` - Function embeddings
+  - `commits.message_embedding` - Commit message embeddings
+  - `pull_requests.title_embedding` & `pull_requests.body_embedding` - PR embeddings
+  - `directories.summary_embedding` - Directory summary embeddings
+  - `code_nodes.code_embedding` - Code snippet embeddings
+  - `test_nodes.test_embedding` - Test body embeddings
+- Create vector indexes for performance optimization
+- Maintain existing relational and graph schema
+
+### Core Implementation Updates
+- **SQLiteClient**: Extended with vector operations (storeVector, vectorSearch, semanticSearch)
+- **DataLoader**: Unified data loading with batchLoadToSQLiteWithVectors method
+- **SearchService**: Updated to use SQLite vector search with graceful fallback
+- **Remove LanceDBClient**: Complete removal of LanceDB client class
+- **Vector Extension Loading**: Automatic sqlite-vec extension loading with graceful degradation
+
+### Configuration Changes
+- **Environment Variables**: 
+  - Remove: `HIKMA_LANCEDB_PATH`
+  - Add: `HIKMA_SQLITE_VEC_EXTENSION`
+- **Database Config**: Simplified to single SQLite configuration with optional vector extension path
+- **Docker**: Updated containers to include sqlite-vec extension binaries
+- **Health Checks**: Simplified to SQLite-only monitoring with vector extension status
+
+### Documentation Updates
+- **API Documentation**: Updated to reflect unified SQLite architecture
+- **Configuration Guide**: Added sqlite-vec extension setup instructions for multiple platforms
+- **Architecture Diagrams**: Updated all diagrams to show unified database design
+- **README**: Updated storage strategy and technology stack descriptions
+- **Deployment Guides**: Simplified deployment with single database architecture
+
+### Testing Updates
+- **Unit Tests**: Added SQLite vector operation tests, removed LanceDB tests
+- **Integration Tests**: Updated for unified architecture validation
+- **Test Coverage**: Comprehensive testing of vector storage and retrieval operations
+- **Error Handling**: Enhanced error handling for vector extension unavailability
+
+### Performance & Reliability Improvements
+- **Single Database**: Eliminates multi-database synchronization complexity
+- **ACID Transactions**: Full transactional support across all data types
+- **Unified Queries**: Enable hybrid search combining metadata and vector similarity
+- **Simplified Backup**: Single .db file backup and restore procedures
+- **Graceful Degradation**: System continues to function when vector extension is unavailable
+
+### Breaking Changes
+- **API Changes**: SearchService methods now use SQLite vector search
+- **Configuration**: Database configuration structure simplified
+- **Environment**: HIKMA_LANCEDB_PATH environment variable removed
+- **Dependencies**: @lancedb/lancedb package removed, sqlite-vec added
+- **Docker**: Container startup requires sqlite-vec extension binary
+
+### Migration Benefits
+- **Simplified Architecture**: Single database reduces operational complexity
+- **Better Performance**: Unified queries eliminate cross-database joins
+- **Easier Deployment**: No separate vector database server required
+- **Improved Reliability**: Single point of failure instead of multiple databases
+- **Enhanced Backup**: Simple file-based backup and restore procedures
+- **Cost Reduction**: Eliminates need for separate vector database infrastructure
+
+### Version Bump
+- Package version updated to 2.0.0 reflecting major architectural change
+
+### Files Changed
+- Core: 42 files modified, 2 files deleted
+- Tests: 8 test files updated for new architecture
+- Documentation: 12 documentation files updated
+- Configuration: Docker, K8s, and deployment scripts updated
+- Dependencies: Package.json updated with new dependencies
+
+This migration maintains all existing functionality while significantly simplifying the system architecture and improving operational characteristics.

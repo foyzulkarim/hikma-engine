@@ -49,12 +49,10 @@ spec:
           value: "3000"
         - name: HIKMA_API_HOST
           value: "0.0.0.0"
-        - name: HIKMA_LANCEDB_PATH
-          value: "/app/data/lancedb"
         - name: HIKMA_SQLITE_PATH
           value: "/app/data/metadata.db"
-        - name: HIKMA_TINKERGRAPH_URL
-          value: "ws://hikma-tinkergraph:8182/gremlin"
+        - name: HIKMA_SQLITE_VEC_EXTENSION
+          value: "/app/extensions/vec0.so"
         - name: HIKMA_API_REDIS_ENABLED
           value: "true"
         - name: HIKMA_API_REDIS_URL

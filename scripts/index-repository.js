@@ -24,26 +24,29 @@ async function indexRepository() {
 
     console.log(`📁 Repository: ${repoPath}`);
 
-    // Initialize configuration
-    const config = new ConfigManager();
-    
     // Override database paths for fresh start
     const dataDir = path.join(__dirname, '..', 'data');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     
-    const dbConfig = {
-      lancedb: {
-        path: path.join(dataDir, `lancedb-${timestamp}`)
-      },
-      sqlite: {
-        path: path.join(dataDir, `enhanced-graph-${timestamp}.db`)
-      }
-    };
+    // Ensure data directory exists
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    const dbPath = path.join(dataDir, `unified-hikma-${timestamp}.db`);
+    const vectorExtensionPath = path.join(__dirname, '..', 'extensions', 'vec0.dylib');
 
-    console.log(`💾 Database files:`);
-    console.log(`   - SQLite: ${dbConfig.sqlite.path}`);
-    console.log(`   - LanceDB: ${dbConfig.lancedb.path}`);
+    console.log(`💾 Unified SQLite Database:`);
+    console.log(`   - Database: ${dbPath}`);
+    console.log(`   - Vector Extension: ${vectorExtensionPath}`);
     console.log('');
+    
+    // Set environment variables to override default config
+    process.env.HIKMA_SQLITE_PATH = dbPath;
+    process.env.HIKMA_SQLITE_VEC_EXTENSION = vectorExtensionPath;
+
+    // Initialize configuration (will use environment overrides)
+    const config = new ConfigManager(repoPath);
 
     // Create indexer with enhanced configuration
     const indexer = new Indexer(repoPath, config);
@@ -52,31 +55,37 @@ async function indexRepository() {
     console.log('⚡ Starting indexing process...');
     const startTime = Date.now();
     
-    await indexer.index();
+    const result = await indexer.run();
     
     const endTime = Date.now();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
     
     console.log(`\n✅ Indexing completed successfully in ${duration}s`);
     
-    // Display statistics
+    // Display statistics from indexing result
     console.log('\n📊 Indexing Statistics:');
+    console.log(`   - Total nodes: ${result.totalNodes}`);
+    console.log(`   - Total edges: ${result.totalEdges}`);
+    console.log(`   - Processed files: ${result.processedFiles}`);
+    console.log(`   - Incremental: ${result.isIncremental}`);
+    console.log(`   - Duration: ${result.duration}ms`);
+    console.log(`   - Errors: ${result.errors.length}`);
     
-    // Connect to the database to get stats
+    // Connect to the database to get additional stats
     const { SQLiteClient } = require('../dist/persistence/db-clients');
+    const dbConfig = config.getDatabaseConfig();
     const client = new SQLiteClient(dbConfig.sqlite.path);
     
     try {
       await client.connect();
-      const stats = await client.getEnhancedGraphStats();
+      const stats = await client.getIndexingStats();
+      const vectorAvailable = await client.isVectorSearchAvailable();
       
-      console.log(`   - Total nodes: ${stats.nodeCount}`);
-      console.log(`   - Total edges: ${stats.edgeCount}`);
-      console.log(`   - Node types:`, stats.nodeTypes);
-      console.log(`   - Edge types:`, stats.edgeTypes);
-      console.log(`   - Repositories:`, Object.keys(stats.repoBreakdown).length);
-      console.log(`   - Languages:`, Object.keys(stats.fileLanguages).join(', '));
-      console.log(`   - Functions: ${stats.functionComplexity.totalFunctions} (avg ${stats.functionComplexity.avgLoc.toFixed(1)} LOC)`);
+      console.log('\n📈 Database Statistics:');
+      console.log(`   - Files: ${stats.totalFiles || 0}`);
+      console.log(`   - Functions: ${stats.totalFunctions || 0}`);
+      console.log(`   - Commits: ${stats.totalCommits || 0}`);
+      console.log(`   - Vector search available: ${vectorAvailable}`);
       
       client.disconnect();
     } catch (error) {
@@ -84,10 +93,11 @@ async function indexRepository() {
     }
 
     console.log('\n🎯 Next Steps:');
-    console.log('   1. Query relationships using the enhanced graph database');
-    console.log('   2. Use business keys for precise node identification');
+    console.log('   1. Query relationships using the unified SQLite database');
+    console.log('   2. Test semantic search with vector embeddings');
     console.log('   3. Analyze code dependencies and data flow');
-    console.log(`   4. Database file: ${dbConfig.sqlite.path}`);
+    console.log('   4. Test hybrid search combining metadata and vector search');
+    console.log(`   5. Database file: ${dbConfig.sqlite.path}`);
 
   } catch (error) {
     console.error('❌ Indexing failed:', error.message);

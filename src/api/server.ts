@@ -318,6 +318,15 @@ export class APIServer {
  * Creates and configures the API server with default settings.
  */
 export function createAPIServer(overrides: Partial<ServerConfig> = {}): APIServer {
+  // Initialize configuration if not already initialized
+  const { initializeConfig, getConfig } = require('../config');
+  try {
+    getConfig();
+  } catch (error) {
+    // Configuration not initialized, initialize it
+    initializeConfig();
+  }
+
   const defaultConfig: ServerConfig = {
     port: parseInt(process.env.PORT || '3000', 10),
     host: process.env.HOST || '0.0.0.0',

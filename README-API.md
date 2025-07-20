@@ -129,9 +129,8 @@ HIKMA_API_TIMEOUT=30000               # Request timeout (ms)
 
 ### Database Configuration
 ```bash
-HIKMA_LANCEDB_PATH=./data/lancedb     # LanceDB path
-HIKMA_SQLITE_PATH=./data/metadata.db  # SQLite database path
-HIKMA_TINKERGRAPH_URL=ws://localhost:8182/gremlin  # TinkerGraph URL
+HIKMA_SQLITE_PATH=./data/metadata.db           # SQLite database path
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib  # Vector extension path
 ```
 
 ### Cache Configuration

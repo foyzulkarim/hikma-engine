@@ -1,5 +1,5 @@
 /**
- * @file Tests for the enhanced polyglot data persistence functionality in DataLoader.
+ * @file Tests for the dual database persistence functionality in DataLoader.
  */
 
 import { DataLoader } from '../src/modules/data-loader';
@@ -8,7 +8,7 @@ import { NodeWithEmbedding, Edge, FileNode, RepositoryNode } from '../src/types'
 import * as fs from 'fs';
 import * as path from 'path';
 
-describe('DataLoader Polyglot Persistence', () => {
+describe('DataLoader Dual Database Persistence', () => {
   let dataLoader: DataLoader;
   let config: ConfigManager;
   const testDbPath = path.join(__dirname, 'test-polyglot.db');
@@ -27,7 +27,6 @@ describe('DataLoader Polyglot Persistence', () => {
     dataLoader = new DataLoader(
       testLanceDbPath,
       testDbPath,
-      'ws://localhost:8182/gremlin',
       config
     );
   });
@@ -48,10 +47,8 @@ describe('DataLoader Polyglot Persistence', () => {
       
       expect(connectivity).toHaveProperty('lancedb');
       expect(connectivity).toHaveProperty('sqlite');
-      expect(connectivity).toHaveProperty('tinkergraph');
       expect(typeof connectivity.lancedb).toBe('boolean');
       expect(typeof connectivity.sqlite).toBe('boolean');
-      expect(typeof connectivity.tinkergraph).toBe('boolean');
     });
 
     it('should perform health check on databases', async () => {
@@ -66,8 +63,8 @@ describe('DataLoader Polyglot Persistence', () => {
     });
   });
 
-  describe('Polyglot Data Loading', () => {
-    it('should load data to multiple databases with fallback handling', async () => {
+  describe('Dual Database Data Loading', () => {
+    it('should load data to dual databases with fallback handling', async () => {
       const testNodes: NodeWithEmbedding[] = [
         {
           id: 'repo-1',
@@ -108,7 +105,6 @@ describe('DataLoader Polyglot Persistence', () => {
       expect(result).toHaveProperty('results');
       expect(result.results).toHaveProperty('lancedb');
       expect(result.results).toHaveProperty('sqlite');
-      expect(result.results).toHaveProperty('tinkergraph');
       
       // At least one database should succeed
       const successfulDatabases = Object.values(result.results).filter(r => r.success).length;
@@ -201,10 +197,8 @@ describe('DataLoader Polyglot Persistence', () => {
       expect(stats).toHaveProperty('connectivity');
       expect(stats.databases).toHaveProperty('lancedb');
       expect(stats.databases).toHaveProperty('sqlite');
-      expect(stats.databases).toHaveProperty('tinkergraph');
       expect(stats.connectivity).toHaveProperty('lancedb');
       expect(stats.connectivity).toHaveProperty('sqlite');
-      expect(stats.connectivity).toHaveProperty('tinkergraph');
     });
   });
 });

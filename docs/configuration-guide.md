@@ -8,7 +8,7 @@ hikma-engine uses a centralized configuration system that supports both file-bas
 
 The configuration is organized into four main sections:
 
-1. **Database Configuration**: Settings for SQLite, LanceDB, and TinkerGraph
+1. **Database Configuration**: Settings for SQLite with vector extension support
 2. **AI Configuration**: Settings for embedding and summary generation models
 3. **Indexing Configuration**: File patterns, language support, and processing limits
 4. **Logging Configuration**: Log levels, outputs, and file paths
@@ -20,14 +20,9 @@ The system comes with sensible defaults that work out of the box:
 ```typescript
 const defaultConfig: AppConfig = {
   database: {
-    lancedb: {
-      path: './data/lancedb'
-    },
     sqlite: {
-      path: './data/metadata.db'
-    },
-    tinkergraph: {
-      url: 'ws://localhost:8182/gremlin'
+      path: './data/metadata.db',
+      vectorExtension: './extensions/vec0.dylib'
     }
   },
   ai: {
@@ -85,17 +80,14 @@ All configuration options can be overridden using environment variables. The sys
 HIKMA_SQLITE_PATH=./data/custom-metadata.db
 ```
 
-#### LanceDB (Vector Database)
+#### SQLite Vector Extension
 ```bash
-# Path to LanceDB directory
-HIKMA_LANCEDB_PATH=./data/custom-lancedb
+# Path to sqlite-vec extension binary
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib  # macOS
+# HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.so   # Linux
 ```
 
-#### TinkerGraph (Graph Database)
-```bash
-# TinkerGraph server URL
-HIKMA_TINKERGRAPH_URL=ws://graph-server:8182/gremlin
-```
+The sqlite-vec extension enables vector similarity search within SQLite, providing unified storage for both metadata and vector embeddings.
 
 ### AI Configuration
 
@@ -162,8 +154,7 @@ Create a `.env` file in your project root:
 ```env
 # Database Configuration
 HIKMA_SQLITE_PATH=./data/production.db
-HIKMA_LANCEDB_PATH=./data/vectors
-HIKMA_TINKERGRAPH_URL=ws://production-graph:8182/gremlin
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.so
 
 # AI Configuration
 HIKMA_EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
@@ -214,7 +205,127 @@ HIKMA_LOG_LEVEL=error
 HIKMA_ENABLE_CONSOLE_LOG=false
 HIKMA_ENABLE_FILE_LOG=false
 HIKMA_SQLITE_PATH=:memory:      # In-memory database for tests
-HIKMA_LANCEDB_PATH=./test-data/lancedb
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
+```
+
+## SQLite-vec Extension Setup
+
+### Installation Instructions
+
+The sqlite-vec extension is required for vector similarity search functionality. Follow these platform-specific instructions:
+
+#### Automated Installation Script
+
+Create an installation script for easy setup:
+
+```bash
+#!/bin/bash
+# install-sqlite-vec.sh
+
+set -e
+
+EXTENSION_DIR="./extensions"
+PLATFORM=$(uname -s)
+ARCH=$(uname -m)
+
+# Create extensions directory
+mkdir -p "$EXTENSION_DIR"
+
+# Determine the correct binary URL
+case "$PLATFORM" in
+    "Darwin")
+        case "$ARCH" in
+            "arm64")
+                URL="https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-darwin-aarch64.dylib"
+                FILENAME="vec0.dylib"
+                ;;
+            "x86_64")
+                URL="https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-darwin-x86_64.dylib"
+                FILENAME="vec0.dylib"
+                ;;
+            *)
+                echo "Unsupported macOS architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        ;;
+    "Linux")
+        case "$ARCH" in
+            "x86_64")
+                URL="https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-linux-x86_64.so"
+                FILENAME="vec0.so"
+                ;;
+            "aarch64")
+                URL="https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-linux-aarch64.so"
+                FILENAME="vec0.so"
+                ;;
+            *)
+                echo "Unsupported Linux architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo "Unsupported platform: $PLATFORM"
+        exit 1
+        ;;
+esac
+
+echo "Downloading sqlite-vec extension for $PLATFORM ($ARCH)..."
+curl -L -o "$EXTENSION_DIR/$FILENAME" "$URL"
+
+echo "Setting executable permissions..."
+chmod +x "$EXTENSION_DIR/$FILENAME"
+
+echo "sqlite-vec extension installed successfully at $EXTENSION_DIR/$FILENAME"
+echo "Set environment variable: HIKMA_SQLITE_VEC_EXTENSION=$PWD/$EXTENSION_DIR/$FILENAME"
+```
+
+Run the installation script:
+```bash
+chmod +x install-sqlite-vec.sh
+./install-sqlite-vec.sh
+```
+
+#### macOS (Apple Silicon)
+```bash
+# Download the extension binary
+curl -L -o extensions/vec0.dylib https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-darwin-aarch64.dylib
+
+# Set environment variable
+export HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
+```
+
+#### macOS (Intel)
+```bash
+# Download the extension binary
+curl -L -o extensions/vec0.dylib https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-darwin-x86_64.dylib
+
+# Set environment variable
+export HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
+```
+
+#### Linux (x86_64)
+```bash
+# Download the extension binary
+curl -L -o extensions/vec0.so https://github.com/asg017/sqlite-vec/releases/latest/download/sqlite-vec-v0.1.0-deno-linux-x86_64.so
+
+# Set environment variable
+export HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.so
+```
+
+#### Docker Deployment
+```dockerfile
+# Add to your Dockerfile
+RUN mkdir -p /app/extensions
+COPY extensions/vec0.so /app/extensions/
+ENV HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
+```
+
+### Verification
+```bash
+# Test that the extension loads correctly
+npm run test:integration
 ```
 
 ## Advanced Configuration
@@ -246,12 +357,7 @@ HIKMA_SUMMARY_MODEL=anthropic:claude-3-haiku
 HIKMA_SQLITE_PATH=./data/metadata-{project}-{date}.db
 ```
 
-#### Remote Graph Database
-```bash
-# Connect to remote TinkerGraph cluster
-HIKMA_TINKERGRAPH_URL=wss://graph-cluster.example.com:8182/gremlin
-HIKMA_TINKERGRAPH_AUTH_TOKEN=your-auth-token
-```
+
 
 ### Performance Tuning
 

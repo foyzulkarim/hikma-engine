@@ -23,8 +23,8 @@ RUN npm prune --production
 # Production stage
 FROM node:18-alpine AS production
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and dependencies for sqlite-vec extension
+RUN apk add --no-cache dumb-init curl
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -40,9 +40,19 @@ COPY package*.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
-# Create data directory for databases
-RUN mkdir -p /app/data && \
+# Create data and extensions directories
+RUN mkdir -p /app/data /app/extensions && \
     chown -R hikma:nodejs /app
+
+# Download sqlite-vec extension for Alpine Linux (x86_64)
+# Using a specific version to ensure reproducible builds
+RUN curl -L -o /tmp/sqlite-vec.tar.gz \
+    "https://github.com/asg017/sqlite-vec/releases/download/v0.1.0-alpha.1/sqlite-vec-0.1.0-alpha.1-linux-x86_64-extension.tar.gz" && \
+    cd /tmp && \
+    tar -xzf sqlite-vec.tar.gz && \
+    mv vec0.so /app/extensions/ && \
+    rm -f /tmp/sqlite-vec.tar.gz && \
+    chown -R hikma:nodejs /app/extensions
 
 # Switch to non-root user
 USER hikma
@@ -50,7 +60,7 @@ USER hikma
 # Expose port
 EXPOSE 3000
 
-# Health check
+# Health check - only check SQLite connectivity
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/api/v1/monitoring/liveness', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
@@ -58,6 +68,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV NODE_ENV=production
 ENV HIKMA_API_PORT=3000
 ENV HIKMA_API_HOST=0.0.0.0
+ENV HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]

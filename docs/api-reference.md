@@ -240,14 +240,9 @@ interface Edge {
 #### `DatabaseConfig`
 ```typescript
 interface DatabaseConfig {
-  lancedb: {
-    path: string;
-  };
   sqlite: {
     path: string;
-  };
-  tinkergraph: {
-    url: string;
+    vectorExtension?: string;
   };
 }
 ```
@@ -280,7 +275,7 @@ interface IndexingConfig {
 
 ### SQLiteClient
 
-Manages SQLite database operations for relational data.
+Manages SQLite database operations for relational data and graph storage.
 
 #### Methods
 
@@ -296,38 +291,23 @@ Inserts edges into SQLite database.
 ##### `getNodesByType(type: NodeType): Promise<BaseNode[]>`
 Retrieves nodes by type from database.
 
-### LanceDBClient
+### SQLiteClient Vector Operations
 
-Manages LanceDB operations for vector storage and similarity search.
-
-#### Methods
-
-##### `initialize(): Promise<void>`
-Sets up LanceDB tables and indexes.
-
-##### `insertEmbeddings(embeddings: NodeWithEmbedding[]): Promise<void>`
-Stores vector embeddings in LanceDB.
-
-##### `searchSimilar(embedding: number[], limit: number): Promise<SimilarityResult[]>`
-Performs similarity search using vector embeddings.
-
-### TinkerGraphClient
-
-Manages TinkerGraph operations for graph traversals and analysis.
+Manages SQLite vector operations using sqlite-vec extension for unified storage and similarity search.
 
 #### Methods
 
-##### `initialize(): Promise<void>`
-Sets up TinkerGraph connection and schema.
+##### `storeVector(table: string, column: string, id: string, embedding: number[]): Promise<void>`
+Stores vector embeddings in SQLite BLOB columns using sqlite-vec format.
 
-##### `addVertex(node: BaseNode): Promise<void>`
-Adds a vertex to the graph database.
+##### `vectorSearch(table: string, column: string, queryEmbedding: number[], limit: number): Promise<VectorSearchResult[]>`
+Performs similarity search using vec_distance_cosine() function.
 
-##### `addEdge(edge: Edge): Promise<void>`
-Adds an edge to the graph database.
+##### `isVectorSearchAvailable(): Promise<boolean>`
+Checks if sqlite-vec extension is loaded and vector search is available.
 
-##### `traverse(query: string): Promise<any[]>`
-Executes Gremlin traversal queries.
+##### `semanticSearch(queryEmbedding: number[], limit: number): Promise<SemanticSearchResults>`
+Performs unified semantic search across all tables with vector columns.
 
 ## Logging System
 
@@ -387,8 +367,7 @@ The system supports configuration through environment variables:
 
 ### Database Configuration
 - `HIKMA_SQLITE_PATH`: Path to SQLite database file
-- `HIKMA_LANCEDB_PATH`: Path to LanceDB directory
-- `HIKMA_TINKERGRAPH_URL`: TinkerGraph server URL
+- `HIKMA_SQLITE_VEC_EXTENSION`: Path to sqlite-vec extension binary
 
 ### AI Configuration
 - `HIKMA_EMBEDDING_MODEL`: Embedding model name

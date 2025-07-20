@@ -1,11 +1,11 @@
 /**
- * @file Responsible for loading processed nodes and edges into the polyglot persistence layer.
- *       Manages data persistence across LanceDB (vector), TinkerGraph (graph), and SQLite (relational) databases.
+ * @file Responsible for loading processed nodes and edges into the unified SQLite persistence layer.
+ *       Manages data persistence across SQLite database with vector support via sqlite-vec extension.
  */
 
 import { NodeWithEmbedding, Edge, FileNode, DirectoryNode, CodeNode, CommitNode, TestNode, PullRequestNode, RepositoryNode, FunctionNode, BaseNode } from '../types';
 import * as crypto from 'crypto';
-import { LanceDBClient, SQLiteClient } from '../persistence/db-clients';
+import { SQLiteClient } from '../persistence/db-clients';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { 
@@ -20,106 +20,65 @@ import {
 } from '../utils/error-handling';
 
 /**
- * Loads processed data into the various database systems.
+ * Loads processed data into the unified SQLite database system.
  */
 export class DataLoader {
-  private lancedbPath: string;
   private sqlitePath: string;
   private config: ConfigManager;
   private logger = getLogger('DataLoader');
 
-  private lancedbClient: LanceDBClient;
   private sqliteClient: SQLiteClient;
 
   /**
    * Initializes the DataLoader with database connection parameters.
-   * @param {string} lancedbPath - Path to the LanceDB database.
    * @param {string} sqlitePath - Path to the SQLite database file.
    * @param {ConfigManager} config - Configuration manager instance.
    */
-  constructor(lancedbPath: string, sqlitePath: string, config: ConfigManager) {
-    this.lancedbPath = lancedbPath;
+  constructor(sqlitePath: string, config: ConfigManager) {
     this.sqlitePath = sqlitePath;
     this.config = config;
 
-    // Initialize database clients
-    this.lancedbClient = new LanceDBClient(lancedbPath);
+    // Initialize database client
     this.sqliteClient = new SQLiteClient(sqlitePath);
 
     this.logger.info('DataLoader initialized', {
-      lancedbPath,
       sqlitePath,
     });
   }
 
   /**
-   * Establishes connections to all databases with individual error handling.
+   * Establishes connections to SQLite database.
    */
   private async connectToDatabases(): Promise<{
-    lancedb: boolean;
     sqlite: boolean;
   }> {
-    const operation = this.logger.operation('Connecting to databases');
+    const operation = this.logger.operation('Connecting to SQLite database');
     const connectionStatus = {
-      lancedb: false,
       sqlite: false,
     };
 
-    this.logger.info('Connecting to all databases');
+    this.logger.info('Connecting to SQLite database');
 
-    // Connect to each database individually with error handling
-    const connectionPromises = [
-      this.connectToLanceDB().then(() => {
-        connectionStatus.lancedb = true;
-        this.logger.info('LanceDB connected successfully');
-      }).catch((error) => {
-        this.logger.warn('Failed to connect to LanceDB', { error: getErrorMessage(error) });
-      }),
-
-      this.connectToSQLite().then(() => {
-        connectionStatus.sqlite = true;
-        this.logger.info('SQLite connected successfully');
-      }).catch((error) => {
-        this.logger.warn('Failed to connect to SQLite', { error: getErrorMessage(error) });
-      }),
-    ];
-
-    await Promise.allSettled(connectionPromises);
-
-    const connectedCount = Object.values(connectionStatus).filter(Boolean).length;
-    this.logger.info(`Connected to ${connectedCount}/2 databases`, connectionStatus);
-
-    // Require at least one database to be connected
-    if (connectedCount === 0) {
-      const error = new Error('Failed to connect to any database');
-      this.logger.error('All database connections failed');
-      operation();
+    // Connect to SQLite database with error handling
+    try {
+      await this.connectToSQLite();
+      connectionStatus.sqlite = true;
+      this.logger.info('SQLite connected successfully');
+    } catch (error) {
+      this.logger.error('Failed to connect to SQLite', { error: getErrorMessage(error) });
       throw error;
     }
 
+    const connectedCount = Object.values(connectionStatus).filter(Boolean).length;
+    this.logger.info(`Connected to ${connectedCount}/1 databases`, connectionStatus);
+
+    // Require SQLite database to be connected
+    if (connectedCount === 0) {
+      throw new DatabaseConnectionError('SQLite', 'Failed to connect to SQLite database');
+    }
+    
     operation();
     return connectionStatus;
-  }
-
-  /**
-   * Connects to LanceDB with retry logic and circuit breaker.
-   */
-  private async connectToLanceDB(): Promise<void> {
-    try {
-      await withRetry(
-        async () => {
-          await this.lancedbClient.connect();
-        },
-        DEFAULT_RETRY_CONFIG,
-        this.logger,
-        'LanceDB connection'
-      );
-    } catch (error) {
-      this.logger.error('Failed to connect to LanceDB after all retries', { 
-        error: getErrorMessage(error) 
-      });
-      throw new DatabaseConnectionError('LanceDB', `Connection failed: ${getErrorMessage(error)}`, error);
-    }
   }
 
   /**
@@ -144,93 +103,23 @@ export class DataLoader {
   }
 
   /**
-   * Disconnects from all databases with individual error handling.
+   * Disconnects from SQLite database.
    */
   private async disconnectFromDatabases(): Promise<void> {
-    const operation = this.logger.operation('Disconnecting from databases');
+    const operation = this.logger.operation('Disconnecting from SQLite database');
 
-    this.logger.info('Disconnecting from all databases');
+    this.logger.info('Disconnecting from SQLite database');
 
-    // Disconnect from each database individually with error handling
-    const disconnectionPromises = [
-      this.lancedbClient.disconnect().catch((error) => {
-        this.logger.warn('Failed to disconnect from LanceDB', { error: getErrorMessage(error) });
-      }),
-
-      Promise.resolve().then(() => {
-        this.sqliteClient.disconnect();
-      }).catch((error) => {
-        this.logger.warn('Failed to disconnect from SQLite', { error: getErrorMessage(error) });
-      }),
-    ];
-
-    await Promise.allSettled(disconnectionPromises);
-
-    this.logger.info('Database disconnection completed');
-    operation();
-  }
-
-  /**
-   * Loads nodes with embeddings into LanceDB for vector similarity search.
-   * @param {NodeWithEmbedding[]} nodes - Array of nodes with embeddings.
-   */
-  private async batchLoadToVectorDB(nodes: NodeWithEmbedding[]): Promise<void> {
-    const operation = this.logger.operation(`Loading ${nodes.length} nodes to LanceDB`);
-
+    // Disconnect from SQLite with error handling
     try {
-      this.logger.info(`Starting LanceDB batch load for ${nodes.length} nodes`);
-
-      // Group nodes by type for better organization
-      const nodesByType = this.groupNodesByType(nodes);
-
-      for (const [nodeType, typeNodes] of Object.entries(nodesByType)) {
-        if (typeNodes.length === 0) continue;
-
-        this.logger.debug(`Loading ${typeNodes.length} ${nodeType} nodes to LanceDB`);
-
-        // Prepare data for LanceDB
-        const vectorData = typeNodes.map(node => ({
-          id: node.id,
-          type: node.type,
-          properties: JSON.stringify(node.properties),
-          embedding: node.embedding,
-        }));
-
-        // Create or get table for this node type
-        const tableName = `${nodeType.toLowerCase()}s`;
-
-        try {
-          // Try to get existing table first
-          let table;
-          try {
-            table = await this.lancedbClient.getTable(tableName);
-            this.logger.debug(`Using existing LanceDB table: ${tableName}`);
-          } catch (error) {
-            // Table doesn't exist, create it
-            table = await this.lancedbClient.createTable(tableName, vectorData);
-            this.logger.debug(`Created new LanceDB table: ${tableName}`);
-          }
-
-          // Insert data (LanceDB handles batch inserts)
-          if (table && table.add) {
-            await table.add(vectorData);
-          } else {
-            this.logger.warn(`LanceDB table ${tableName} doesn't support add operation (mock mode)`);
-          }
-
-          this.logger.debug(`Loaded ${typeNodes.length} ${nodeType} nodes to LanceDB table: ${tableName}`);
-        } catch (tableError) {
-          this.logger.warn(`Failed to load ${nodeType} nodes to LanceDB`, { error: getErrorMessage(tableError) });
-        }
-      }
-
-      this.logger.info('LanceDB batch load completed successfully');
-      operation();
+      this.sqliteClient.disconnect();
+      this.logger.info('SQLite disconnected successfully');
     } catch (error) {
-      this.logger.error('LanceDB batch load failed', { error: getErrorMessage(error) });
-      operation();
-      throw error;
+      this.logger.warn('Failed to disconnect from SQLite', { error: getErrorMessage(error) });
     }
+
+    this.logger.info('SQLite database disconnection completed');
+    operation();
   }
 
   /**
@@ -414,6 +303,207 @@ export class DataLoader {
       operation();
       throw error;
     }
+  }
+
+  /**
+   * Loads nodes with embeddings into unified SQLite storage for both relational and vector operations.
+   * @param {NodeWithEmbedding[]} nodes - Array of nodes with embeddings.
+   */
+  private async batchLoadToSQLiteWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const operation = this.logger.operation(`Loading ${nodes.length} nodes with vectors to SQLite`);
+
+    try {
+      this.logger.info(`Starting unified SQLite batch load for ${nodes.length} nodes with embeddings`);
+
+      // Group nodes by type for efficient processing
+      const nodesByType = this.groupNodesByType(nodes);
+
+      // Process each node type
+      for (const [nodeType, typeNodes] of Object.entries(nodesByType)) {
+        if (typeNodes.length === 0) continue;
+
+        this.logger.debug(`Loading ${typeNodes.length} ${nodeType} nodes with embeddings to SQLite`);
+
+        try {
+          switch (nodeType) {
+            case 'FileNode':
+              await this.loadFileNodesWithVectors(typeNodes.filter(n => n.type === 'FileNode'));
+              break;
+            case 'FunctionNode':
+              await this.loadFunctionNodesWithVectors(typeNodes.filter(n => n.type === 'FunctionNode'));
+              break;
+            case 'CommitNode':
+              await this.loadCommitNodesWithVectors(typeNodes.filter(n => n.type === 'CommitNode'));
+              break;
+            case 'DirectoryNode':
+              await this.loadDirectoryNodesWithVectors(typeNodes.filter(n => n.type === 'DirectoryNode'));
+              break;
+            case 'CodeNode':
+              await this.loadCodeNodesWithVectors(typeNodes.filter(n => n.type === 'CodeNode'));
+              break;
+            case 'TestNode':
+              await this.loadTestNodesWithVectors(typeNodes.filter(n => n.type === 'TestNode'));
+              break;
+            case 'PullRequestNode':
+              await this.loadPullRequestNodesWithVectors(typeNodes.filter(n => n.type === 'PullRequestNode'));
+              break;
+            default:
+              this.logger.warn(`Unknown node type: ${nodeType}, skipping vector loading`);
+          }
+        } catch (typeError) {
+          this.logger.error(`Failed to load ${nodeType} nodes with vectors`, { error: getErrorMessage(typeError) });
+          throw typeError;
+        }
+      }
+
+      this.logger.info('Unified SQLite batch load with vectors completed successfully');
+      operation();
+    } catch (error) {
+      this.logger.error('Unified SQLite batch load with vectors failed', { error: getErrorMessage(error) });
+      operation();
+      throw error;
+    }
+  }
+
+  /**
+   * Loads file nodes with content embeddings.
+   */
+  private async loadFileNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const fileData = nodes.map(node => ({
+      id: node.id,
+      repoId: node.properties.repoId,
+      filePath: node.properties.filePath,
+      fileName: node.properties.fileName,
+      fileExtension: node.properties.fileExtension,
+      language: node.properties.language,
+      sizeKb: node.properties.sizeKb,
+      contentHash: node.properties.contentHash,
+      fileType: node.properties.fileType,
+      aiSummary: node.properties.aiSummary,
+      imports: node.properties.imports,
+      exports: node.properties.exports,
+      contentEmbedding: node.embedding
+    }));
+
+    await this.sqliteClient.batchInsertFiles(fileData);
+  }
+
+  /**
+   * Loads function nodes with signature and body embeddings.
+   */
+  private async loadFunctionNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const functionData = nodes.map(node => ({
+      id: node.id,
+      fileId: node.properties.fileId,
+      name: node.properties.name,
+      signature: node.properties.signature,
+      returnType: node.properties.returnType,
+      accessLevel: node.properties.accessLevel,
+      filePath: node.properties.filePath,
+      startLine: node.properties.startLine,
+      endLine: node.properties.endLine,
+      body: node.properties.body,
+      calledByMethods: node.properties.calledByMethods ? JSON.stringify(node.properties.calledByMethods) : undefined,
+      callsMethods: node.properties.callsMethods ? JSON.stringify(node.properties.callsMethods) : undefined,
+      usesExternalMethods: node.properties.usesExternalMethods,
+      internalCallGraph: node.properties.internalCallGraph ? JSON.stringify(node.properties.internalCallGraph) : undefined,
+      transitiveCallDepth: node.properties.transitiveCallDepth,
+      signatureEmbedding: node.embedding, // Use main embedding for signature
+      bodyEmbedding: node.properties.bodyEmbedding // If available separately
+    }));
+
+    await this.sqliteClient.batchInsertFunctions(functionData);
+  }
+
+  /**
+   * Loads commit nodes with message embeddings.
+   */
+  private async loadCommitNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const commitData = nodes.map(node => ({
+      id: node.id,
+      hash: node.properties.hash,
+      author: node.properties.author,
+      date: node.properties.date,
+      message: node.properties.message,
+      diffSummary: node.properties.diffSummary,
+      messageEmbedding: node.embedding
+    }));
+
+    await this.sqliteClient.batchInsertCommits(commitData);
+  }
+
+  /**
+   * Loads directory nodes with summary embeddings.
+   */
+  private async loadDirectoryNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const directoryData = nodes.map(node => ({
+      id: node.id,
+      repoId: node.properties.repoId,
+      dirPath: node.properties.dirPath,
+      dirName: node.properties.dirName,
+      aiSummary: node.properties.aiSummary,
+      summaryEmbedding: node.embedding
+    }));
+
+    await this.sqliteClient.batchInsertDirectories(directoryData);
+  }
+
+  /**
+   * Loads code nodes with code embeddings.
+   */
+  private async loadCodeNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const codeData = nodes.map(node => ({
+      id: node.id,
+      name: node.properties.name,
+      signature: node.properties.signature,
+      body: node.properties.body,
+      docstring: node.properties.docstring,
+      language: node.properties.language,
+      filePath: node.properties.filePath,
+      startLine: node.properties.startLine,
+      endLine: node.properties.endLine,
+      codeEmbedding: node.embedding
+    }));
+
+    await this.sqliteClient.batchInsertCodeNodes(codeData);
+  }
+
+  /**
+   * Loads test nodes with test embeddings.
+   */
+  private async loadTestNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const testData = nodes.map(node => ({
+      id: node.id,
+      name: node.properties.name,
+      filePath: node.properties.filePath,
+      startLine: node.properties.startLine,
+      endLine: node.properties.endLine,
+      framework: node.properties.framework,
+      testBody: node.properties.testBody,
+      testEmbedding: node.embedding
+    }));
+
+    await this.sqliteClient.batchInsertTestNodes(testData);
+  }
+
+  /**
+   * Loads pull request nodes with title and body embeddings.
+   */
+  private async loadPullRequestNodesWithVectors(nodes: NodeWithEmbedding[]): Promise<void> {
+    const prData = nodes.map(node => ({
+      id: node.id,
+      prId: node.properties.prId,
+      title: node.properties.title,
+      author: node.properties.author,
+      createdAt: node.properties.createdAt,
+      mergedAt: node.properties.mergedAt,
+      url: node.properties.url,
+      body: node.properties.body,
+      titleEmbedding: node.embedding, // Use main embedding for title
+      bodyEmbedding: node.properties.bodyEmbedding // If available separately
+    }));
+
+    await this.sqliteClient.batchInsertPullRequests(prData);
   }
 
   /**
@@ -825,24 +915,21 @@ export class DataLoader {
   }
 
   /**
-   * Main method to load all nodes and edges into the polyglot persistence layer.
+   * Main method to load all nodes and edges into the dual persistence layer.
    * @param {NodeWithEmbedding[]} nodes - Array of nodes with embeddings.
    * @param {Edge[]} edges - Array of edges.
    */
   async load(nodes: NodeWithEmbedding[], edges: Edge[]): Promise<{
     success: boolean;
     results: {
-      lancedb: { success: boolean; error?: string };
       sqlite: { success: boolean; error?: string };
     };
   }> {
-    const operation = this.logger.operation(`Loading ${nodes.length} nodes and ${edges.length} edges to all databases`);
+    const operation = this.logger.operation(`Loading ${nodes.length} nodes and ${edges.length} edges to unified SQLite database`);
 
     const results: {
-      lancedb: { success: boolean; error?: string };
       sqlite: { success: boolean; error?: string };
     } = {
-      lancedb: { success: false },
       sqlite: { success: false },
     };
 
@@ -856,108 +943,57 @@ export class DataLoader {
         throw new DataValidationError('Data validation failed before persistence', validation.errors);
       }
       
-      this.logger.info('Starting polyglot data loading', {
+      this.logger.info('Starting unified SQLite data loading', {
         totalNodes: nodes.length,
         totalEdges: edges.length,
         nodeTypes: this.getNodeTypeStats(nodes),
         validationPassed: true
       });
 
-      // Connect to all databases with individual error handling
+      // Connect to SQLite database
       const connectionStatus = await this.connectToDatabases();
 
-      // Verify we have at least one working database
-      const availableDatabases = Object.entries(connectionStatus)
-        .filter(([_, connected]) => connected)
-        .map(([name, _]) => name);
-
-      if (availableDatabases.length === 0) {
-        throw new Error('No databases available for data loading');
+      if (!connectionStatus.sqlite) {
+        throw new Error('SQLite database not available for data loading');
       }
 
-      this.logger.info('Available databases for loading', { availableDatabases });
+      this.logger.info('SQLite database connected and ready for loading');
 
-      // Load data to all available databases in parallel with individual error handling
-      const loadingPromises = [];
-
-      if (connectionStatus.lancedb) {
-        loadingPromises.push(
-          this.batchLoadToVectorDB(nodes)
-            .then(() => {
-              results.lancedb.success = true;
-              this.logger.info('LanceDB loading completed successfully');
-            })
-            .catch((error) => {
-              results.lancedb.error = getErrorMessage(error);
-              this.logger.error('LanceDB loading failed', { error: getErrorMessage(error) });
-            })
-        );
-      } else {
-        results.lancedb.error = 'Database not connected';
-      }
-
-      if (connectionStatus.sqlite) {
-        loadingPromises.push(
-          this.batchLoadToSqlite(nodes, edges)
-            .then(() => {
-              results.sqlite.success = true;
-              this.logger.info('SQLite loading completed successfully');
-            })
-            .catch((error) => {
-              results.sqlite.error = getErrorMessage(error);
-              this.logger.error('SQLite loading failed', { error: getErrorMessage(error) });
-            })
-        );
-
-        // Also load to SQLite graph storage (same database, different tables)
-        loadingPromises.push(
-          this.batchLoadToGraphDB(nodes, edges)
-            .then(() => {
-              this.logger.info('SQLite graph loading completed successfully');
-            })
-            .catch((error) => {
-              this.logger.error('SQLite graph loading failed', { error: getErrorMessage(error) });
-            })
-        );
-      } else {
-        results.sqlite.error = 'Database not connected';
-      }
-
-      // Wait for all loading operations to complete
-      await Promise.allSettled(loadingPromises);
-
-      // Check if at least one database loaded successfully
-      const successfulLoads = Object.values(results).filter(result => result.success).length;
-      const totalAttempts = availableDatabases.length;
-
-      this.logger.info('Polyglot data loading completed', {
-        successful: successfulLoads,
-        total: totalAttempts,
-        results,
-      });
-
-      if (successfulLoads === 0) {
-        throw new Error('All database loading operations failed');
+      // Load data to unified SQLite storage with vectors and graph data
+      try {
+        // Load nodes with embeddings to SQLite (includes vector storage)
+        await this.batchLoadToSQLiteWithVectors(nodes);
+        
+        // Load graph relationships to SQLite
+        await this.batchLoadToGraphDB(nodes, edges);
+        
+        results.sqlite.success = true;
+        this.logger.info('Unified SQLite data loading completed successfully');
+      } catch (sqliteError) {
+        results.sqlite.error = getErrorMessage(sqliteError);
+        this.logger.error('SQLite data loading failed', { error: getErrorMessage(sqliteError) });
+        throw sqliteError;
       }
 
       operation();
       return {
-        success: successfulLoads > 0,
-        results,
+        success: results.sqlite.success,
+        results
       };
     } catch (error) {
-      this.logger.error('Polyglot data loading failed', { error: getErrorMessage(error) });
+      this.logger.error('Unified SQLite data loading failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     } finally {
-      // Always disconnect from databases
+      // Always disconnect from database
       try {
         await this.disconnectFromDatabases();
       } catch (disconnectError) {
-        this.logger.warn('Failed to disconnect from some databases', { error: getErrorMessage(disconnectError) });
+        this.logger.warn('Failed to disconnect from database', { error: getErrorMessage(disconnectError) });
       }
     }
   }
+
 
   /**
    * Gets statistics about the nodes by type.
@@ -1008,28 +1044,11 @@ export class DataLoader {
 
       for (const dbName of failedDatabases) {
         switch (dbName) {
-          case 'lancedb':
-            if (connectionStatus.lancedb) {
-              retryPromises.push(
-                this.batchLoadToVectorDB(nodes)
-                  .then(() => {
-                    results.lancedb = { success: true };
-                    this.logger.info('LanceDB retry successful');
-                  })
-                  .catch((error) => {
-                    results.lancedb = { success: false, error: getErrorMessage(error) };
-                    this.logger.error('LanceDB retry failed', { error: getErrorMessage(error) });
-                  })
-              );
-            } else {
-              results.lancedb = { success: false, error: 'Database not connected' };
-            }
-            break;
-
           case 'sqlite':
             if (connectionStatus.sqlite) {
               retryPromises.push(
-                this.batchLoadToSqlite(nodes, edges)
+                this.batchLoadToSQLiteWithVectors(nodes)
+                  .then(() => this.batchLoadToGraphDB(nodes, edges))
                   .then(() => {
                     results.sqlite = { success: true };
                     this.logger.info('SQLite retry successful');
@@ -1073,7 +1092,7 @@ export class DataLoader {
   }
 
   /**
-   * Performs a health check on all databases and attempts basic recovery.
+   * Performs a health check on SQLite database and attempts basic recovery.
    * @returns {Promise<{healthy: string[], unhealthy: string[], recovered: string[]}>}
    */
   async performHealthCheck(): Promise<{
@@ -1081,14 +1100,14 @@ export class DataLoader {
     unhealthy: string[];
     recovered: string[];
   }> {
-    const operation = this.logger.operation('Performing database health check');
+    const operation = this.logger.operation('Performing SQLite database health check');
 
     const healthy: string[] = [];
     const unhealthy: string[] = [];
     const recovered: string[] = [];
 
     try {
-      this.logger.info('Starting database health check');
+      this.logger.info('Starting SQLite database health check');
 
       // Check current connectivity
       const connectivity = await this.verifyDatabaseConnectivity();
@@ -1109,15 +1128,6 @@ export class DataLoader {
         for (const dbName of unhealthy) {
           try {
             switch (dbName) {
-              case 'lancedb':
-                await this.connectToLanceDB();
-                if (this.lancedbClient.isConnectedToDatabase()) {
-                  recovered.push(dbName);
-                  healthy.push(dbName);
-                  unhealthy.splice(unhealthy.indexOf(dbName), 1);
-                }
-                break;
-
               case 'sqlite':
                 await this.connectToSQLite();
                 if (this.sqliteClient.isConnectedToDatabase()) {
@@ -1133,7 +1143,7 @@ export class DataLoader {
         }
       }
 
-      this.logger.info('Database health check completed', {
+      this.logger.info('SQLite database health check completed', {
         healthy: healthy.length,
         unhealthy: unhealthy.length,
         recovered: recovered.length,
@@ -1142,7 +1152,7 @@ export class DataLoader {
       operation();
       return { healthy, unhealthy, recovered };
     } catch (error) {
-      this.logger.error('Database health check failed', { error: getErrorMessage(error) });
+      this.logger.error('SQLite database health check failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     } finally {
@@ -1151,57 +1161,38 @@ export class DataLoader {
   }
 
   /**
-   * Verifies database connectivity before attempting operations.
-   * @returns {Promise<{lancedb: boolean, sqlite: boolean}>}
+   * Verifies SQLite database connectivity before attempting operations.
+   * @returns {Promise<{sqlite: boolean}>}
    */
   async verifyDatabaseConnectivity(): Promise<{
-    lancedb: boolean;
     sqlite: boolean;
   }> {
-    const operation = this.logger.operation('Verifying database connectivity');
+    const operation = this.logger.operation('Verifying SQLite database connectivity');
 
     try {
       const connectivity = {
-        lancedb: false,
         sqlite: false,
       };
 
-      // Test each database connection
-      const verificationPromises = [
-        this.verifyLanceDBConnection().then(() => {
-          connectivity.lancedb = true;
-        }).catch((error) => {
-          this.logger.debug('LanceDB connectivity check failed', { error: getErrorMessage(error) });
-        }),
+      // Test SQLite database connection
+      try {
+        await this.verifySQLiteConnection();
+        connectivity.sqlite = true;
+      } catch (error) {
+        this.logger.debug('SQLite connectivity check failed', { error: getErrorMessage(error) });
+      }
 
-        this.verifySQLiteConnection().then(() => {
-          connectivity.sqlite = true;
-        }).catch((error) => {
-          this.logger.debug('SQLite connectivity check failed', { error: getErrorMessage(error) });
-        }),
-      ];
-
-      await Promise.allSettled(verificationPromises);
-
-      this.logger.info('Database connectivity verification completed', connectivity);
+      this.logger.info('SQLite database connectivity verification completed', connectivity);
       operation();
       return connectivity;
     } catch (error) {
-      this.logger.error('Database connectivity verification failed', { error: getErrorMessage(error) });
+      this.logger.error('SQLite database connectivity verification failed', { error: getErrorMessage(error) });
       operation();
       throw error;
     }
   }
 
-  /**
-   * Verifies LanceDB connection.
-   */
-  private async verifyLanceDBConnection(): Promise<void> {
-    if (!this.lancedbClient.isConnectedToDatabase()) {
-      throw new Error('LanceDB not connected');
-    }
-    // Additional verification could include a simple query
-  }
+
 
   /**
    * Verifies SQLite connection.
@@ -1284,18 +1275,17 @@ export class DataLoader {
   }
 
   /**
-   * Gets loading statistics and database health information.
-   * @returns {Promise<{databases: Record<string, boolean>, lastLoad: Date | null, connectivity: {lancedb: boolean, sqlite: boolean}}>}
+   * Gets loading statistics and SQLite database health information.
+   * @returns {Promise<{databases: Record<string, boolean>, lastLoad: Date | null, connectivity: {sqlite: boolean}}>}
    */
   async getStats(): Promise<{
     databases: Record<string, boolean>;
     lastLoad: Date | null;
-    connectivity: {lancedb: boolean, sqlite: boolean};
+    connectivity: {sqlite: boolean};
   }> {
     try {
       // Check database connectivity
       const databases = {
-        lancedb: this.lancedbClient.isConnectedToDatabase(),
         sqlite: this.sqliteClient.isConnectedToDatabase(),
       };
 

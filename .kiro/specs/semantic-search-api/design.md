@@ -423,8 +423,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - HIKMA_LANCEDB_PATH=/data/lancedb
       - HIKMA_SQLITE_PATH=/data/metadata.db
+      - HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
     volumes:
       - ./data:/data
     depends_on:

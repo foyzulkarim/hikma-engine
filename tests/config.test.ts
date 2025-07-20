@@ -27,8 +27,8 @@ describe('ConfigManager', () => {
     it('should resolve database paths relative to project root', () => {
       const dbConfig = configManager.getDatabaseConfig();
       
-      expect(dbConfig.lancedb.path).toBe(path.resolve(testProjectRoot, './data/lancedb'));
       expect(dbConfig.sqlite.path).toBe(path.resolve(testProjectRoot, './data/metadata.db'));
+      expect(dbConfig.sqlite.vectorExtension).toBe(path.resolve(testProjectRoot, './extensions/vec0.dylib'));
     });
   });
 
@@ -36,9 +36,9 @@ describe('ConfigManager', () => {
     it('should return database configuration', () => {
       const dbConfig = configManager.getDatabaseConfig();
       
-      expect(dbConfig.lancedb).toBeDefined();
       expect(dbConfig.sqlite).toBeDefined();
-      expect(dbConfig.tinkergraph).toBeDefined();
+      expect(dbConfig.sqlite.path).toBeDefined();
+      expect(dbConfig.sqlite.vectorExtension).toBeDefined();
     });
 
     it('should return AI configuration', () => {
@@ -105,14 +105,14 @@ describe('Environment variable overrides', () => {
   });
 
   it('should override database paths from environment variables', () => {
-    process.env.HIKMA_LANCEDB_PATH = './custom/lancedb';
     process.env.HIKMA_SQLITE_PATH = './custom/metadata.db';
+    process.env.HIKMA_SQLITE_VEC_EXTENSION = './custom/vec0.so';
     
     const configManager = new ConfigManager('/tmp/test');
     const dbConfig = configManager.getDatabaseConfig();
     
-    expect(dbConfig.lancedb.path).toBe(path.resolve('/tmp/test', './custom/lancedb'));
     expect(dbConfig.sqlite.path).toBe(path.resolve('/tmp/test', './custom/metadata.db'));
+    expect(dbConfig.sqlite.vectorExtension).toBe(path.resolve('/tmp/test', './custom/vec0.so'));
   });
 
   it('should override log level from environment variables', () => {

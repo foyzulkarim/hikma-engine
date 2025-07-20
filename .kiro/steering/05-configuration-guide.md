@@ -9,10 +9,9 @@ inclusion: always
 The system supports the following environment variables:
 
 ```
-# Database paths
-HIKMA_LANCEDB_PATH=./data/lancedb
+# Database configuration
 HIKMA_SQLITE_PATH=./data/metadata.db
-HIKMA_TINKERGRAPH_URL=ws://localhost:8182/gremlin
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
 
 # Logging
 HIKMA_LOG_LEVEL=info  # debug, info, warn, error
@@ -29,17 +28,11 @@ The configuration system is managed through `src/config/index.ts` and supports:
 
 ## Database Configuration
 
-- **LanceDB**: Vector database for embeddings and semantic search
-  - Configure path, collection names, and dimensions
-  - Default path: `./data/lancedb`
-
-- **SQLite**: Relational database for metadata and lookups
-  - Configure path and table schemas
-  - Default path: `./data/metadata.db`
-
-- **TinkerGraph**: Graph database for relationship queries
-  - Configure connection URL and authentication
-  - Default URL: `ws://localhost:8182/gremlin`
+- **SQLite with sqlite-vec**: Unified database for metadata, graph relationships, and vector embeddings
+  - Configure database path and sqlite-vec extension path
+  - Default database path: `./data/metadata.db`
+  - Default extension path: `./extensions/vec0.dylib` (macOS) or `./extensions/vec0.so` (Linux)
+  - Handles enhanced graph storage with nodes, edges, and vector embeddings in a single database
 
 ## Indexing Configuration
 

@@ -70,14 +70,7 @@ async function checkDatabaseHealth(): Promise<{ status: 'healthy' | 'unhealthy';
       };
     }
     
-    // Check LanceDB directory exists
-    const lancedbDir = path.dirname(dbConfig.lancedb.path);
-    if (!fs.existsSync(lancedbDir)) {
-      return {
-        status: 'unhealthy',
-        error: `LanceDB directory does not exist: ${lancedbDir}`,
-      };
-    }
+
     
     const responseTime = Date.now() - startTime;
     return {

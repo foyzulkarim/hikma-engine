@@ -11,7 +11,7 @@ import {
   CircuitBreaker,
   isRetryableError
 } from '../src/utils/error-handling';
-import { SQLiteClient, TinkerGraphClient } from '../src/persistence/db-clients';
+import { SQLiteClient } from '../src/persistence/db-clients';
 import { DataLoader } from '../src/modules/data-loader';
 import { ConfigManager } from '../src/config';
 import { NodeWithEmbedding, Edge } from '../src/types';
@@ -239,23 +239,7 @@ describe('Comprehensive Error Handling', () => {
     });
   });
 
-  describe('TinkerGraph Client Error Handling', () => {
-    test('should validate connection URL', async () => {
-      const invalidClient = new TinkerGraphClient('invalid-url');
-      
-      await expect(invalidClient.connect()).rejects.toThrow(DatabaseConnectionError);
-    });
 
-    test('should handle connection with retry logic', async () => {
-      const client = new TinkerGraphClient('ws://localhost:8182/gremlin');
-      
-      // Should succeed with mock implementation
-      await expect(client.connect()).resolves.not.toThrow();
-      expect(client.isConnectedToDatabase()).toBe(true);
-      
-      await client.disconnect();
-    });
-  });
 
   describe('DataLoader Error Handling', () => {
     test('should validate nodes before persistence', async () => {
@@ -263,7 +247,6 @@ describe('Comprehensive Error Handling', () => {
       const dataLoader = new DataLoader(
         testLanceDbPath,
         testDbPath,
-        'ws://localhost:8182/gremlin',
         config
       );
 
@@ -287,7 +270,6 @@ describe('Comprehensive Error Handling', () => {
       const dataLoader = new DataLoader(
         testLanceDbPath,
         testDbPath,
-        'ws://localhost:8182/gremlin',
         config
       );
 
@@ -318,7 +300,6 @@ describe('Comprehensive Error Handling', () => {
       const dataLoader = new DataLoader(
         testLanceDbPath,
         testDbPath,
-        'ws://localhost:8182/gremlin',
         config
       );
 
@@ -349,7 +330,6 @@ describe('Comprehensive Error Handling', () => {
       const dataLoader = new DataLoader(
         testLanceDbPath,
         testDbPath,
-        'ws://localhost:8182/gremlin',
         config
       );
 
@@ -371,7 +351,6 @@ describe('Comprehensive Error Handling', () => {
       expect(result).toHaveProperty('results');
       expect(result.results).toHaveProperty('lancedb');
       expect(result.results).toHaveProperty('sqlite');
-      expect(result.results).toHaveProperty('tinkergraph');
     });
   });
 

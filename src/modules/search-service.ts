@@ -1,10 +1,10 @@
 /**
  * @file Provides search functionality for the hikma-engine knowledge graph.
- *       Supports both semantic vector search and metadata-based queries across all node types.
+ *       Supports both semantic vector search and metadata-based queries using unified SQLite storage.
  */
 
 import { EmbeddingService } from './embedding-service';
-import { LanceDBClient, SQLiteClient } from '../persistence/db-clients';
+import { SQLiteClient } from '../persistence/db-clients';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
@@ -61,7 +61,6 @@ export interface EnhancedSearchResult extends SearchResult {
  */
 export class SearchService {
   private embeddingService: EmbeddingService;
-  private lancedbClient: LanceDBClient;
   private sqliteClient: SQLiteClient;
   private config: ConfigManager;
   private logger = getLogger('SearchService');
@@ -72,12 +71,11 @@ export class SearchService {
     const dbConfig = config.getDatabaseConfig();
     
     this.embeddingService = new EmbeddingService(config);
-    this.lancedbClient = new LanceDBClient(dbConfig.lancedb.path);
     this.sqliteClient = new SQLiteClient(dbConfig.sqlite.path);
   }
 
   /**
-   * Initializes the search service by loading models and connecting to databases.
+   * Initializes the search service by loading models and connecting to database.
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
@@ -91,9 +89,16 @@ export class SearchService {
       this.logger.info('Loading embedding model...');
       await this.embeddingService.loadModel();
       
-      this.logger.info('Connecting to databases...');
-      await this.lancedbClient.connect();
-      this.sqliteClient.connect();
+      this.logger.info('Connecting to SQLite database...');
+      await this.sqliteClient.connect();
+      
+      // Check if vector search is available
+      const vectorAvailable = await this.sqliteClient.isVectorSearchAvailable();
+      if (vectorAvailable) {
+        this.logger.info('Vector search capabilities available');
+      } else {
+        this.logger.warn('Vector search not available, semantic search will be limited');
+      }
       
       this.isInitialized = true;
       this.logger.info('Search service initialized successfully');
@@ -135,37 +140,34 @@ export class SearchService {
         nodeTypes 
       });
 
+      // Check if vector search is available
+      const vectorAvailable = await this.sqliteClient.isVectorSearchAvailable();
+      if (!vectorAvailable) {
+        this.logger.warn('Vector search not available, falling back to text-based search');
+        try {
+          const textResults = await this.searchCodeByText(query, { limit });
+          return textResults;
+        } catch (error) {
+          this.logger.warn('Text search also failed, returning empty results', { error: getErrorMessage(error) });
+          return [];
+        }
+      }
+
       // Generate embedding for the query
       const queryEmbedding = await this.embeddingService.embedQuery(query);
       
-      // Search in LanceDB for each node type
+      // Search in SQLite using vector similarity for each node type
       const allResults: SearchResult[] = [];
       const nodeTypesToSearch = nodeTypes || [
-        'CodeNode', 'FileNode', 'DirectoryNode', 'CommitNode', 'TestNode', 'PullRequestNode'
+        'Code', 'File', 'Directory', 'Commit', 'Test', 'PullRequest', 'Function'
       ];
 
       for (const nodeType of nodeTypesToSearch) {
         try {
-          const table = await this.lancedbClient.getTable(nodeType);
-          if (!table) {
-            this.logger.debug(`Table ${nodeType} does not exist, skipping`);
-            continue;
-          }
-          
-          const results = await table
-            .search(queryEmbedding)
-            .limit(limit * 2) // Get more results to filter later
-            .toArray();
-
-          const processedResults = results.map((result: any) => ({
-            node: result,
-            similarity: 1 - result._distance, // Convert distance to similarity
-            type: nodeType
-          }));
-
-          allResults.push(...processedResults);
+          const results = await this.searchNodeTypeWithVectors(nodeType, queryEmbedding, limit, minSimilarity);
+          allResults.push(...results);
         } catch (error) {
-          this.logger.warn(`Failed to search in ${nodeType} table`, { error: getErrorMessage(error) });
+          this.logger.warn(`Failed to search ${nodeType} nodes`, { error: getErrorMessage(error) });
         }
       }
 
@@ -187,6 +189,83 @@ export class SearchService {
       operation();
       throw error;
     }
+  }
+
+  /**
+   * Searches a specific node type using vector similarity.
+   */
+  private async searchNodeTypeWithVectors(
+    nodeType: string, 
+    queryEmbedding: number[], 
+    limit: number, 
+    minSimilarity: number
+  ): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
+    
+    try {
+      switch (nodeType) {
+        case 'File':
+          const fileResults = await this.sqliteClient.vectorSearch('files', 'content_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...fileResults.map(r => this.convertToSearchResult(r, 'File')));
+          break;
+          
+        case 'Function':
+          // Search both signature and body embeddings
+          const sigResults = await this.sqliteClient.vectorSearch('functions', 'signature_embedding', queryEmbedding, limit, minSimilarity);
+          const bodyResults = await this.sqliteClient.vectorSearch('functions', 'body_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...sigResults.map(r => this.convertToSearchResult(r, 'Function')));
+          results.push(...bodyResults.map(r => this.convertToSearchResult(r, 'Function')));
+          break;
+          
+        case 'Commit':
+          const commitResults = await this.sqliteClient.vectorSearch('commits', 'message_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...commitResults.map(r => this.convertToSearchResult(r, 'Commit')));
+          break;
+          
+        case 'Directory':
+          const dirResults = await this.sqliteClient.vectorSearch('directories', 'summary_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...dirResults.map(r => this.convertToSearchResult(r, 'Directory')));
+          break;
+          
+        case 'Code':
+          const codeResults = await this.sqliteClient.vectorSearch('code_nodes', 'code_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...codeResults.map(r => this.convertToSearchResult(r, 'Code')));
+          break;
+          
+        case 'Test':
+          const testResults = await this.sqliteClient.vectorSearch('test_nodes', 'test_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...testResults.map(r => this.convertToSearchResult(r, 'Test')));
+          break;
+          
+        case 'PullRequest':
+          // Search both title and body embeddings
+          const titleResults = await this.sqliteClient.vectorSearch('pull_requests', 'title_embedding', queryEmbedding, limit, minSimilarity);
+          const prBodyResults = await this.sqliteClient.vectorSearch('pull_requests', 'body_embedding', queryEmbedding, limit, minSimilarity);
+          results.push(...titleResults.map(r => this.convertToSearchResult(r, 'PullRequest')));
+          results.push(...prBodyResults.map(r => this.convertToSearchResult(r, 'PullRequest')));
+          break;
+      }
+    } catch (error) {
+      this.logger.warn(`Vector search failed for ${nodeType}`, { error: getErrorMessage(error) });
+    }
+    
+    return results;
+  }
+
+  /**
+   * Converts SQLite vector search result to SearchResult format.
+   */
+  private convertToSearchResult(result: {id: string, similarity: number, data: any}, nodeType: string): SearchResult {
+    return {
+      node: {
+        id: result.id,
+        type: nodeType as NodeType,
+        properties: result.data,
+        embedding: [] // Don't return embedding in search results
+      },
+      similarity: result.similarity,
+      rank: 0 // Will be set when sorting
+    };
   }
 
   /**
@@ -278,7 +357,7 @@ export class SearchService {
       }
 
       // Remove duplicates and limit results
-      const uniqueNodeIds = [...new Set(allNodeIds)].slice(0, limit);
+      const uniqueNodeIds = Array.from(new Set(allNodeIds)).slice(0, limit);
 
       this.logger.info('Metadata search completed', {
         filters,
@@ -461,7 +540,7 @@ export class SearchService {
   }
 
   /**
-   * Gets the LanceDB table name for a given node type.
+   * Gets the SQLite table name for a given node type.
    * @param nodeType - The node type
    * @returns Table name
    */
@@ -893,11 +972,10 @@ export class SearchService {
   }
 
   /**
-   * Disconnects from all databases.
+   * Disconnects from SQLite database.
    */
   async disconnect(): Promise<void> {
     try {
-      await this.lancedbClient.disconnect();
       this.sqliteClient.disconnect();
       this.isInitialized = false;
       this.logger.info('Search service disconnected');

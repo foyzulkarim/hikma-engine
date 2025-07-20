@@ -34,9 +34,9 @@ The hikma-engine operates as a pipeline, ingesting raw code and Git history, pro
 **Output:** Nodes with attached vector embeddings.
 
 ### 3.6. Database Loader 
-**Responsibility:** Persists the processed nodes (with embeddings) and edges into the respective polyglot persistence layers: LanceDB (vector database), TinkerGraph (graph database), and SQLite (relational database). For incremental indexing, it will use upsert operations and handle deletions.
+**Responsibility:** Persists the processed nodes (with embeddings) and edges into the unified SQLite database with vector extension support. For incremental indexing, it will use upsert operations and handle deletions.
 **Input:** Nodes with embeddings, all generated edges.
-**Output:** Populated databases.
+**Output:** Populated unified SQLite database with metadata, graph relationships, and vector embeddings.
 
 ### 3.7. Main Orchestrator (`index.ts`)
 **Responsibility:** Coordinates the entire indexing pipeline, orchestrating the execution of each component in sequence. It will also manage the state for incremental indexing (last indexed commit hash).
@@ -68,19 +68,17 @@ The hikma-engine operates as a pipeline, ingesting raw code and Git history, pro
 
 ## 5. Persistence Strategy
 
-The hikma-engine employs a polyglot persistence approach to optimize for different query patterns:
+The hikma-engine employs a unified persistence approach using SQLite with vector extension support to optimize for all query patterns:
 
-### 5.1. LanceDB (Vector Database)
-- **Purpose:** Stores all nodes with their associated vector embeddings, enabling efficient semantic similarity searches (e.g., find code similar in meaning to a natural language query).
-- **Data Stored:** `id`, `type`, `properties` (flattened), `embedding` for all node types.
+### 5.1. SQLite with Vector Extension (Unified Database)
+- **Purpose:** Stores all nodes with their metadata, relationships, and vector embeddings in a single database, enabling both structured queries and semantic similarity searches.
+- **Data Stored:** Complete node metadata, graph relationships, and vector embeddings for all node types.
+- **Vector Support:** Uses sqlite-vec extension for efficient similarity search with vec_distance_cosine() function.
+- **Benefits:** Simplified architecture, ACID transactions, unified queries combining metadata and vector search.
 
-### 5.2. TinkerGraph (Graph Database)
-- **Purpose:** Stores the rich relationships between all nodes, facilitating complex graph traversals and pattern matching (e.g., find all methods called by a specific function, identify tests covering a particular module, trace file evolution).
-- **Data Stored:** All nodes as vertices with their properties, and all edges with their types and properties.
-
-### 5.3. SQLite (Relational Database)
-- **Purpose:** Provides fast, lightweight lookup and keyword-based search for metadata and structured properties (e.g., search for files by name, commits by author, test methods by framework). It will also store the last indexed commit hash for incremental updates.
-- **Data Stored:** Selected properties of `FileNode` (including `aiSummary`), `CodeNode`, `CommitNode`, `DirectoryNode` (including `aiSummary`), `TestNode`, and `PullRequestNode` in normalized tables. Also, a dedicated table or entry for indexing state.
+### 5.2. SQLite (Relational + Graph Database)
+- **Purpose:** Provides fast, lightweight lookup and keyword-based search for metadata and structured properties (e.g., search for files by name, commits by author, test methods by framework). Also stores rich relationships between all nodes, facilitating complex graph traversals and pattern matching (e.g., find all methods called by a specific function, identify tests covering a particular module, trace file evolution). It will also store the last indexed commit hash for incremental updates.
+- **Data Stored:** Selected properties of `FileNode` (including `aiSummary`), `CodeNode`, `CommitNode`, `DirectoryNode` (including `aiSummary`), `TestNode`, and `PullRequestNode` in normalized tables. All nodes as vertices with their properties, and all edges with their types and properties in enhanced graph tables. Also, a dedicated table or entry for indexing state.
 
 ## 6. Data Flow
 
@@ -91,7 +89,7 @@ The hikma-engine employs a polyglot persistence approach to optimize for differe
 5.  **Git Analysis:** `GitAnalyzer` processes Git history, generates `CommitNode`s, `PullRequestNode`s (mocked), and `MODIFIED`, `INCLUDES_COMMIT`, `EVOLVED_BY` edges. For incremental updates, it will process only new commits since the last indexed commit.
 6.  **Node/Edge Aggregation:** All generated nodes and edges from `AstParser` and `GitAnalyzer` are combined.
 7.  **Embedding Generation:** `EmbeddingGenerator` takes all combined nodes (including those with AI summaries) and produces vector embeddings for each.
-8.  **Database Loading:** `DatabaseLoader` connects to LanceDB, TinkerGraph, and SQLite, then batch-loads the nodes (with embeddings) and edges into their respective databases. It performs upserts for existing data and inserts for new data, handling deletions as needed. It also updates the last indexed commit hash in SQLite.
+8.  **Database Loading:** `DatabaseLoader` connects to the unified SQLite database with vector extension, then batch-loads the nodes (with embeddings) and edges. It performs upserts for existing data and inserts for new data, handling deletions as needed. Vector embeddings are stored in BLOB columns using sqlite-vec format. It also updates the last indexed commit hash.
 
 ## 7. Implementation Plan
 

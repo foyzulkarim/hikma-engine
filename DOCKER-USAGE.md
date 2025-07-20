@@ -15,8 +15,7 @@ This guide explains how to use Docker to index source repositories and run the S
 │  Docker Containers                                     │ │  │
 │  ├── hikma-indexer (processes source)  ←──────────────┘ │  │
 │  ├── hikma-api (serves search API)                      │  │
-│  ├── redis (caching)                                    │  │
-│  └── tinkergraph (graph database)                       │  │
+│  └── redis (caching)                                    │  │
 ├─────────────────────────────────────────────────────────────┤
 │  Shared Volumes                                             │
 │  ├── hikma-data (databases persist here)  ←─────────────────┘  │
@@ -224,7 +223,6 @@ docker-compose --profile indexing run --rm hikma-indexer node dist/cli/index.ts 
 # Issue: Can't connect to databases
 # Solution: Ensure services are running
 docker-compose ps
-docker-compose logs tinkergraph
 docker-compose logs redis
 ```
 

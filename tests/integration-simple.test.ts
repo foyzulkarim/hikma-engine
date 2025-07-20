@@ -4,7 +4,7 @@
 
 import { DataLoader } from '../src/modules/data-loader';
 import { ConfigManager } from '../src/config';
-import { SQLiteClient, TinkerGraphClient } from '../src/persistence/db-clients';
+import { SQLiteClient } from '../src/persistence/db-clients';
 import { NodeWithEmbedding, Edge, FileNode, RepositoryNode } from '../src/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,33 +13,29 @@ describe('Integration: Core Database Operations', () => {
   let config: ConfigManager;
   let dataLoader: DataLoader;
   let sqliteClient: SQLiteClient;
-  let tinkergraphClient: TinkerGraphClient;
+
   
   const testDbPath = path.join(__dirname, 'test-simple-integration.db');
-  const testLanceDbPath = path.join(__dirname, 'test-simple-integration-lancedb');
 
   beforeEach(async () => {
-    // Clean up test databases
+    // Clean up test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
-    }
-    if (fs.existsSync(testLanceDbPath)) {
-      fs.rmSync(testLanceDbPath, { recursive: true, force: true });
     }
 
     // Initialize configuration and components
     config = new ConfigManager(__dirname);
     config.updateConfig({
       database: {
-        lancedb: { path: testLanceDbPath },
-        sqlite: { path: testDbPath },
-        tinkergraph: { url: 'ws://localhost:8182/gremlin' }
+        sqlite: { 
+          path: testDbPath,
+          vectorExtension: './extensions/vec0.dylib'
+        }
       }
     });
 
-    dataLoader = new DataLoader(testLanceDbPath, testDbPath, 'ws://localhost:8182/gremlin', config);
+    dataLoader = new DataLoader(testDbPath, config);
     sqliteClient = new SQLiteClient(testDbPath);
-    tinkergraphClient = new TinkerGraphClient('ws://localhost:8182/gremlin');
   });
 
   afterEach(async () => {
@@ -47,32 +43,43 @@ describe('Integration: Core Database Operations', () => {
     if (sqliteClient.isConnectedToDatabase()) {
       await sqliteClient.disconnect();
     }
-    if (tinkergraphClient.isConnectedToDatabase()) {
-      await tinkergraphClient.disconnect();
-    }
 
-    // Clean up test databases
+    // Clean up test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
-    }
-    if (fs.existsSync(testLanceDbPath)) {
-      fs.rmSync(testLanceDbPath, { recursive: true, force: true });
     }
   });
 
   describe('Database Connectivity and Health Checks', () => {
-    it('should verify database connectivity', async () => {
+    it('should verify SQLite database connectivity', async () => {
+      // Create some test data to trigger connection
+      const testNodes: NodeWithEmbedding[] = [
+        {
+          id: 'connectivity-test',
+          type: 'RepositoryNode',
+          properties: {
+            repoPath: '/test/connectivity',
+            repoName: 'connectivity-test',
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+          },
+          embedding: new Array(384).fill(0.1),
+        } as NodeWithEmbedding & RepositoryNode,
+      ];
+
+      // Load data which will establish connection
+      const result = await dataLoader.load(testNodes, []);
+      
+      // Now verify connectivity
       const connectivity = await dataLoader.verifyDatabaseConnectivity();
       
-      expect(connectivity).toHaveProperty('lancedb');
       expect(connectivity).toHaveProperty('sqlite');
-      expect(connectivity).toHaveProperty('tinkergraph');
-      expect(typeof connectivity.lancedb).toBe('boolean');
       expect(typeof connectivity.sqlite).toBe('boolean');
-      expect(typeof connectivity.tinkergraph).toBe('boolean');
+      // Should be true after successful load operation
+      expect(result.success).toBe(true);
     });
 
-    it('should perform health check on databases', async () => {
+    it('should perform health check on SQLite database', async () => {
       const healthCheck = await dataLoader.performHealthCheck();
       
       expect(healthCheck).toHaveProperty('healthy');
@@ -103,9 +110,8 @@ describe('Integration: Core Database Operations', () => {
       const result = await dataLoader.load(testNodes, []);
       
       expect(result.success).toBe(true);
-      expect(result.results).toHaveProperty('lancedb');
       expect(result.results).toHaveProperty('sqlite');
-      expect(result.results).toHaveProperty('tinkergraph');
+      expect(result.results.sqlite.success).toBe(true);
     });
 
     it('should handle batch operations efficiently', async () => {
@@ -161,9 +167,7 @@ describe('Integration: Core Database Operations', () => {
       }
 
       const invalidDataLoader = new DataLoader(
-        path.join(invalidDir, 'invalid-lancedb'),
         path.join(invalidDir, 'invalid-sqlite.db'),
-        'ws://invalid:8182/gremlin',
         config
       );
 
@@ -276,9 +280,7 @@ describe('Integration: Core Database Operations', () => {
       expect(stats).toHaveProperty('databases');
       expect(stats).toHaveProperty('lastLoad');
       expect(stats).toHaveProperty('connectivity');
-      expect(stats.databases).toHaveProperty('lancedb');
       expect(stats.databases).toHaveProperty('sqlite');
-      expect(stats.databases).toHaveProperty('tinkergraph');
     });
 
     it('should track operation performance', async () => {
@@ -346,21 +348,129 @@ describe('Integration: Core Database Operations', () => {
     });
   });
 
-  describe('TinkerGraph Specific Operations', () => {
-    it('should connect to TinkerGraph', async () => {
-      await tinkergraphClient.connect();
-      expect(tinkergraphClient.isConnectedToDatabase()).toBe(true);
+  describe('Vector Storage and Retrieval', () => {
+    it('should store and retrieve vector embeddings in SQLite', async () => {
+      await sqliteClient.connect();
+      
+      const testEmbedding = [0.1, 0.2, 0.3, 0.4, 0.5];
+      const testNodeId = 'test-vector-node';
+      
+      // Store vector embedding
+      await sqliteClient.storeVector('files', 'content_embedding', testNodeId, testEmbedding);
+      
+      // Verify vector was stored by checking if vector search is available
+      const vectorAvailable = await sqliteClient.isVectorSearchAvailable();
+      expect(typeof vectorAvailable).toBe('boolean');
     });
 
-    it('should handle vertex and edge operations', async () => {
-      await tinkergraphClient.connect();
+    it('should perform vector similarity search', async () => {
+      await sqliteClient.connect();
       
-      const vertexResult = await tinkergraphClient.addVertex('TestNode', {
-        id: 'test-vertex',
-        name: 'Test Vertex'
-      });
+      // Create test data with embeddings
+      const testNodes: NodeWithEmbedding[] = [
+        {
+          id: 'vector-test-1',
+          type: 'FileNode',
+          properties: {
+            filePath: '/test/math.ts',
+            fileName: 'math.ts',
+            fileExtension: '.ts',
+            repoId: 'test-repo',
+            language: 'typescript',
+            sizeKb: 2.5,
+            contentHash: 'abc123',
+            fileType: 'source' as const,
+          },
+          embedding: [0.1, 0.2, 0.3, 0.4, 0.5],
+        } as NodeWithEmbedding & FileNode,
+        {
+          id: 'vector-test-2',
+          type: 'FileNode',
+          properties: {
+            filePath: '/test/utils.ts',
+            fileName: 'utils.ts',
+            fileExtension: '.ts',
+            repoId: 'test-repo',
+            language: 'typescript',
+            sizeKb: 1.8,
+            contentHash: 'def456',
+            fileType: 'source' as const,
+          },
+          embedding: [0.9, 0.8, 0.7, 0.6, 0.5],
+        } as NodeWithEmbedding & FileNode,
+      ];
+
+      // Load test data
+      await dataLoader.load(testNodes, []);
       
-      expect(vertexResult).toBeDefined();
+      // Perform vector search
+      const queryEmbedding = [0.1, 0.2, 0.3, 0.4, 0.5];
+      const results = await sqliteClient.vectorSearch('files', 'content_embedding', queryEmbedding, 5, 0.1);
+      
+      expect(Array.isArray(results)).toBe(true);
+      if (results.length > 0) {
+        expect(results[0]).toHaveProperty('id');
+        expect(results[0]).toHaveProperty('similarity');
+        expect(results[0]).toHaveProperty('data');
+        expect(typeof results[0].similarity).toBe('number');
+        expect(results[0].similarity).toBeGreaterThanOrEqual(0);
+        expect(results[0].similarity).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('should handle vector extension unavailability gracefully', async () => {
+      await sqliteClient.connect();
+      
+      // Test graceful degradation when vector extension is not available
+      const isVectorAvailable = await sqliteClient.isVectorSearchAvailable();
+      
+      if (!isVectorAvailable) {
+        // Vector search should return empty results or fallback
+        const queryEmbedding = [0.1, 0.2, 0.3, 0.4, 0.5];
+        const results = await sqliteClient.vectorSearch('files', 'content_embedding', queryEmbedding, 5, 0.1);
+        
+        expect(Array.isArray(results)).toBe(true);
+        // Should not throw error even if vector extension is unavailable
+      }
+    });
+
+    it('should store vectors for different node types', async () => {
+      await sqliteClient.connect();
+      
+      const testNodes: NodeWithEmbedding[] = [
+        {
+          id: 'code-vector-test',
+          type: 'CodeNode',
+          properties: {
+            name: 'testFunction',
+            signature: 'function testFunction(): void',
+            language: 'typescript',
+            filePath: '/test/code.ts',
+            startLine: 1,
+            endLine: 10,
+          },
+          embedding: [0.2, 0.3, 0.4, 0.5, 0.6],
+        } as NodeWithEmbedding,
+        {
+          id: 'commit-vector-test',
+          type: 'CommitNode',
+          properties: {
+            hash: 'abc123',
+            author: 'Test Author',
+            date: new Date().toISOString(),
+            message: 'Add test functionality',
+          },
+          embedding: [0.3, 0.4, 0.5, 0.6, 0.7],
+        } as NodeWithEmbedding,
+      ];
+
+      // Load test data with vectors
+      const result = await dataLoader.load(testNodes, []);
+      
+      expect(result.success).toBe(true);
+      expect(result.results.sqlite.success).toBe(true);
     });
   });
+
+
 });

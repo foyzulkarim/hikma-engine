@@ -1,9 +1,8 @@
 /**
  * @file Provides client implementations for interacting with various databases used by hikma-engine.
- *       This includes LanceDB for vector storage, Better-SQLite3 for relational metadata, and Gremlin for graph traversal.
+ *       This includes Better-SQLite3 for relational metadata, graph storage, and vector operations via sqlite-vec.
  */
 
-import * as lancedb from '@lancedb/lancedb';
 import Database, { Database as DatabaseType } from 'better-sqlite3';
 import { getLogger } from '../utils/logger';
 import { 
@@ -29,144 +28,16 @@ import {
   CommitNode, 
   PullRequestNode 
 } from '../types';
-// Import Gremlin for TinkerGraph operations
-// Note: Using mock implementation for development - replace with actual gremlin imports when server is available
-interface DriverRemoteConnection {
-  close(): Promise<void>;
-}
 
-interface GraphTraversalSource {
-  addV(label: string): VertexTraversal;
-  V(id?: string): VertexTraversal;
-}
-
-interface VertexTraversal {
-  property(key: string, value: any): VertexTraversal;
-  next(): Promise<{ value: any }>;
-  addE(label: string): EdgeTraversal;
-}
-
-interface EdgeTraversal {
-  to(target: VertexTraversal): EdgeTraversal;
-  property(key: string, value: any): EdgeTraversal;
-  next(): Promise<{ value: any }>;
-}
 
 /**
- * Client for LanceDB (Vector Database).
- */
-export class LanceDBClient {
-  private db: any; // Placeholder for LanceDB connection
-  private logger = getLogger('LanceDBClient');
-  private isConnected = false;
-
-  /**
-   * Initializes the LanceDB client.
-   * @param {string} path - The file system path where the LanceDB database will be stored.
-   */
-  constructor(private path: string) {
-    this.logger.info(`Initializing LanceDB client`, { path });
-  }
-
-  /**
-   * Establishes a connection to the LanceDB database.
-   */
-  async connect(): Promise<void> {
-    if (this.isConnected) {
-      this.logger.debug('Already connected to LanceDB');
-      return;
-    }
-
-    try {
-      this.logger.info('Connecting to LanceDB');
-      this.db = await lancedb.connect(this.path);
-      this.isConnected = true;
-      this.logger.info('Connected to LanceDB successfully');
-    } catch (error) {
-      this.logger.error('Failed to connect to LanceDB', { error: getErrorMessage(error) });
-      throw error;
-    }
-  }
-
-  /**
-   * Disconnects from the LanceDB database.
-   */
-  async disconnect(): Promise<void> {
-    if (!this.isConnected) {
-      this.logger.debug('Already disconnected from LanceDB');
-      return;
-    }
-
-    try {
-      this.logger.info('Disconnecting from LanceDB');
-      if (this.db && this.db.close) {
-        await this.db.close();
-      }
-      this.isConnected = false;
-      this.logger.info('Disconnected from LanceDB successfully');
-    } catch (error) {
-      this.logger.error('Failed to disconnect from LanceDB', { error: getErrorMessage(error) });
-      throw error;
-    }
-  }
-
-  /**
-   * Retrieves a table from the LanceDB database.
-   * @param {string} tableName - The name of the table to retrieve.
-   * @returns {any} A mock or actual LanceDB table object.
-   */
-  async getTable(tableName: string): Promise<any> {
-    if (!this.isConnected) {
-      throw new Error('Not connected to LanceDB. Call connect() first.');
-    }
-
-    this.logger.debug(`Getting LanceDB table: ${tableName}`);
-    try {
-      return await this.db.openTable(tableName);
-    } catch (error) {
-      // If table doesn't exist, return null
-      this.logger.warn(`Table ${tableName} does not exist`, { error: getErrorMessage(error) });
-      return null;
-    }
-  }
-
-  /**
-   * Creates a table in LanceDB if it doesn't exist.
-   * @param {string} tableName - The name of the table to create.
-   * @param {any[]} schema - The schema definition for the table.
-   * @returns {Promise<any>} The created table object.
-   */
-  async createTable(tableName: string, schema: any[]): Promise<any> {
-    if (!this.isConnected) {
-      throw new Error('Not connected to LanceDB. Call connect() first.');
-    }
-
-    try {
-      this.logger.info(`Creating LanceDB table: ${tableName}`);
-      const table = await this.db.createTable(tableName, schema);
-      this.logger.info(`LanceDB table created successfully: ${tableName}`);
-      return table;
-    } catch (error) {
-      this.logger.error(`Failed to create LanceDB table: ${tableName}`, { error: getErrorMessage(error) });
-      throw error;
-    }
-  }
-
-  /**
-   * Checks if the client is connected.
-   */
-  isConnectedToDatabase(): boolean {
-    return this.isConnected;
-  }
-}
-
-/**
- * Client for SQLite (Relational Database).
+ * Client for SQLite (Relational Database with Vector Support).
  */
 export class SQLiteClient {
   private db: DatabaseType;
   private logger = getLogger('SQLiteClient');
   private isConnected = false;
+  private vectorEnabled = false;
   private circuitBreaker = new CircuitBreaker(5, 60000);
 
   /**
@@ -205,11 +76,14 @@ export class SQLiteClient {
           // Test the connection with a simple query
           await this.testConnection();
           
+          // Load sqlite-vec extension for vector operations
+          this.loadVectorExtension();
+          
           // Initialize tables if they don't exist
           this.initializeTables();
           
           this.isConnected = true;
-          this.logger.info('Connected to SQLite successfully');
+          this.logger.info('Connected to SQLite successfully', { vectorEnabled: this.vectorEnabled });
         },
         DEFAULT_RETRY_CONFIG,
         this.logger,
@@ -234,6 +108,30 @@ export class SQLiteClient {
     } catch (error) {
       this.logger.warn('SQLite connection test failed', { error: getErrorMessage(error) });
       throw error;
+    }
+  }
+
+  /**
+   * Loads the sqlite-vec extension for vector operations.
+   */
+  private loadVectorExtension(): void {
+    try {
+      // Try to load sqlite-vec extension
+      const extensionPath = process.env.HIKMA_SQLITE_VEC_EXTENSION || './extensions/vec0';
+      this.db.loadExtension(extensionPath);
+      
+      // Test if vector functions are available
+      this.db.prepare('SELECT vec_version()').get();
+      
+      this.vectorEnabled = true;
+      this.logger.info('sqlite-vec extension loaded successfully', { extensionPath });
+    } catch (error) {
+      this.vectorEnabled = false;
+      const errorMsg = getErrorMessage(error);
+      this.logger.warn('Failed to load sqlite-vec extension, vector operations will be disabled', { 
+        error: errorMsg,
+        extensionPath: process.env.HIKMA_SQLITE_VEC_EXTENSION || './extensions/vec0'
+      });
     }
   }
 
@@ -571,7 +469,133 @@ export class SQLiteClient {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_business_keys ON graph_edges(source_business_key, target_business_key)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_graph_edges_location ON graph_edges(line, col)`);
 
+    // Add vector columns for embedding storage (sqlite-vec integration)
+    this.addVectorColumns();
+
     this.logger.debug('SQLite tables initialized successfully');
+  }
+
+  /**
+   * Adds vector columns to existing tables for embedding storage using sqlite-vec.
+   * This method extends the schema to support vector operations for semantic search.
+   */
+  private addVectorColumns(): void {
+    this.logger.debug('Adding vector columns for embedding storage');
+
+    if (!this.vectorEnabled) {
+      this.logger.debug('Vector extension not available, skipping vector column creation');
+      return;
+    }
+
+    try {
+      // Add embedding columns to key tables for semantic search
+      
+      // Files table - for file content embeddings
+      this.db.exec(`
+        ALTER TABLE files ADD COLUMN content_embedding BLOB;
+      `);
+      
+      // Code nodes table - for code snippet embeddings  
+      this.db.exec(`
+        ALTER TABLE code_nodes ADD COLUMN code_embedding BLOB;
+      `);
+      
+      // Functions table - for function signature and body embeddings
+      this.db.exec(`
+        ALTER TABLE functions ADD COLUMN signature_embedding BLOB;
+      `);
+      this.db.exec(`
+        ALTER TABLE functions ADD COLUMN body_embedding BLOB;
+      `);
+      
+      // Commits table - for commit message embeddings
+      this.db.exec(`
+        ALTER TABLE commits ADD COLUMN message_embedding BLOB;
+      `);
+      
+      // Pull requests table - for PR title and body embeddings
+      this.db.exec(`
+        ALTER TABLE pull_requests ADD COLUMN title_embedding BLOB;
+      `);
+      this.db.exec(`
+        ALTER TABLE pull_requests ADD COLUMN body_embedding BLOB;
+      `);
+      
+      // Directories table - for directory summary embeddings
+      this.db.exec(`
+        ALTER TABLE directories ADD COLUMN summary_embedding BLOB;
+      `);
+      
+      // Test nodes table - for test body embeddings
+      this.db.exec(`
+        ALTER TABLE test_nodes ADD COLUMN test_embedding BLOB;
+      `);
+
+      // Create vector indexes for performance optimization
+      this.createVectorIndexes();
+
+      this.logger.debug('Vector columns added successfully to all tables');
+      
+    } catch (error) {
+      // Handle case where columns already exist
+      const errorMsg = getErrorMessage(error);
+      if (errorMsg.includes('duplicate column name') || errorMsg.includes('already exists')) {
+        this.logger.debug('Vector columns already exist, skipping creation');
+        // Still try to create indexes in case they don't exist
+        try {
+          this.createVectorIndexes();
+        } catch (indexError) {
+          this.logger.debug('Vector indexes may already exist', { error: getErrorMessage(indexError) });
+        }
+      } else {
+        this.logger.error('Failed to add vector columns', { error: errorMsg });
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Creates vector indexes for performance optimization.
+   */
+  private createVectorIndexes(): void {
+    if (!this.vectorEnabled) {
+      return;
+    }
+
+    try {
+      this.logger.debug('Creating vector indexes for performance optimization');
+      
+      // Note: sqlite-vec uses different indexing approach than traditional SQL indexes
+      // Vector similarity searches are optimized internally by the extension
+      // We can create regular indexes on related columns for hybrid queries
+      
+      // Index for files with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_files_has_embedding ON files(file_id) WHERE content_embedding IS NOT NULL`);
+      
+      // Index for functions with embeddings  
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_functions_has_signature_embedding ON functions(id) WHERE signature_embedding IS NOT NULL`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_functions_has_body_embedding ON functions(id) WHERE body_embedding IS NOT NULL`);
+      
+      // Index for commits with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_commits_has_embedding ON commits(id) WHERE message_embedding IS NOT NULL`);
+      
+      // Index for pull requests with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_pull_requests_has_title_embedding ON pull_requests(id) WHERE title_embedding IS NOT NULL`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_pull_requests_has_body_embedding ON pull_requests(id) WHERE body_embedding IS NOT NULL`);
+      
+      // Index for directories with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_directories_has_embedding ON directories(id) WHERE summary_embedding IS NOT NULL`);
+      
+      // Index for code nodes with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_code_nodes_has_embedding ON code_nodes(id) WHERE code_embedding IS NOT NULL`);
+      
+      // Index for test nodes with embeddings
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_test_nodes_has_embedding ON test_nodes(id) WHERE test_embedding IS NOT NULL`);
+
+      this.logger.debug('Vector indexes created successfully');
+    } catch (error) {
+      this.logger.warn('Failed to create some vector indexes', { error: getErrorMessage(error) });
+    }
   }
 
 
@@ -847,6 +871,7 @@ export class SQLiteClient {
     aiSummary?: string;
     imports?: string[];
     exports?: string[];
+    contentEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
@@ -869,9 +894,9 @@ export class SQLiteClient {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO files (
         file_id, repo_id, file_path, file_name, file_extension, language, 
-        size_kb, content_hash, file_type, ai_summary, imports, exports,
+        size_kb, content_hash, file_type, ai_summary, imports, exports, content_embedding,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -881,6 +906,10 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((fileList: typeof files) => {
       for (const file of fileList) {
         try {
+          const embeddingBlob = file.contentEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(file.contentEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             file.id,
             file.repoId,
@@ -893,7 +922,8 @@ export class SQLiteClient {
             file.fileType || null,
             file.aiSummary || null,
             file.imports ? JSON.stringify(file.imports) : null,
-            file.exports ? JSON.stringify(file.exports) : null
+            file.exports ? JSON.stringify(file.exports) : null,
+            embeddingBlob
           );
           success++;
         } catch (error) {
@@ -927,6 +957,7 @@ export class SQLiteClient {
     dirPath: string;
     dirName: string;
     aiSummary?: string;
+    summaryEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -937,8 +968,8 @@ export class SQLiteClient {
     }
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO directories (id, repo_id, dir_path, dir_name, ai_summary, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT OR REPLACE INTO directories (id, repo_id, dir_path, dir_name, ai_summary, summary_embedding, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -948,12 +979,17 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((dirList: typeof directories) => {
       for (const dir of dirList) {
         try {
+          const embeddingBlob = dir.summaryEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(dir.summaryEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             dir.id,
             dir.repoId,
             dir.dirPath,
             dir.dirName,
-            dir.aiSummary || null
+            dir.aiSummary || null,
+            embeddingBlob
           );
           success++;
         } catch (error) {
@@ -991,6 +1027,7 @@ export class SQLiteClient {
     filePath: string;
     startLine: number;
     endLine: number;
+    codeEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -1003,8 +1040,8 @@ export class SQLiteClient {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO code_nodes (
         id, name, signature, body, docstring, language, file_path, 
-        start_line, end_line, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        start_line, end_line, code_embedding, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -1014,6 +1051,10 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((nodeList: typeof codeNodes) => {
       for (const node of nodeList) {
         try {
+          const embeddingBlob = node.codeEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(node.codeEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             node.id,
             node.name,
@@ -1023,7 +1064,8 @@ export class SQLiteClient {
             node.language,
             node.filePath,
             node.startLine,
-            node.endLine
+            node.endLine,
+            embeddingBlob
           );
           success++;
         } catch (error) {
@@ -1059,6 +1101,7 @@ export class SQLiteClient {
     endLine: number;
     framework?: string;
     testBody?: string;
+    testEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -1070,9 +1113,9 @@ export class SQLiteClient {
 
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO test_nodes (
-        id, name, file_path, start_line, end_line, framework, test_body,
+        id, name, file_path, start_line, end_line, framework, test_body, test_embedding,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -1082,6 +1125,10 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((nodeList: typeof testNodes) => {
       for (const node of nodeList) {
         try {
+          const embeddingBlob = node.testEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(node.testEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             node.id,
             node.name,
@@ -1089,7 +1136,8 @@ export class SQLiteClient {
             node.startLine,
             node.endLine,
             node.framework || null,
-            node.testBody || null
+            node.testBody || null,
+            embeddingBlob
           );
           success++;
         } catch (error) {
@@ -1133,6 +1181,8 @@ export class SQLiteClient {
     usesExternalMethods?: boolean;
     internalCallGraph?: string; // JSON string
     transitiveCallDepth?: number;
+    signatureEmbedding?: number[];
+    bodyEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -1147,8 +1197,8 @@ export class SQLiteClient {
         id, file_id, name, signature, return_type, access_level, file_path,
         start_line, end_line, body, called_by_methods, calls_methods,
         uses_external_methods, internal_call_graph, transitive_call_depth,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        signature_embedding, body_embedding, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -1158,6 +1208,13 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((funcList: typeof functions) => {
       for (const func of funcList) {
         try {
+          const signatureEmbeddingBlob = func.signatureEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(func.signatureEmbedding).buffer) 
+            : null;
+          const bodyEmbeddingBlob = func.bodyEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(func.bodyEmbedding).buffer) 
+            : null;
+            
           // Debug logging to identify problematic data types
           const params = [
             func.id,
@@ -1174,7 +1231,9 @@ export class SQLiteClient {
             func.callsMethods || null, // Already JSON string
             func.usesExternalMethods ? 1 : 0, // Convert boolean to integer for SQLite
             func.internalCallGraph || null, // Already JSON string
-            func.transitiveCallDepth || 0
+            func.transitiveCallDepth || 0,
+            signatureEmbeddingBlob,
+            bodyEmbeddingBlob
           ];
           
           // Check for invalid data types
@@ -1224,6 +1283,7 @@ export class SQLiteClient {
     date: string;
     message: string;
     diffSummary?: string;
+    messageEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -1234,8 +1294,8 @@ export class SQLiteClient {
     }
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO commits (id, hash, author, date, message, diff_summary, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT OR REPLACE INTO commits (id, hash, author, date, message, diff_summary, message_embedding, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -1245,13 +1305,18 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((commitList: typeof commits) => {
       for (const commit of commitList) {
         try {
+          const embeddingBlob = commit.messageEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(commit.messageEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             commit.id,
             commit.hash,
             commit.author,
             commit.date,
             commit.message,
-            commit.diffSummary || null
+            commit.diffSummary || null,
+            embeddingBlob
           );
           success++;
         } catch (error) {
@@ -1288,6 +1353,8 @@ export class SQLiteClient {
     mergedAt?: string;
     url: string;
     body?: string;
+    titleEmbedding?: number[];
+    bodyEmbedding?: number[];
   }>): Promise<{success: number, failed: number, errors: string[]}> {
     if (!this.isConnected) {
       throw new Error('Not connected to SQLite. Call connect() first.');
@@ -1300,8 +1367,8 @@ export class SQLiteClient {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO pull_requests (
         id, pr_id, title, author, created_at_pr, merged_at, url, body,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        title_embedding, body_embedding, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
 
     let success = 0;
@@ -1311,6 +1378,13 @@ export class SQLiteClient {
     const insertMany = this.db.transaction((prList: typeof pullRequests) => {
       for (const pr of prList) {
         try {
+          const titleEmbeddingBlob = pr.titleEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(pr.titleEmbedding).buffer) 
+            : null;
+          const bodyEmbeddingBlob = pr.bodyEmbedding && this.vectorEnabled 
+            ? Buffer.from(new Float32Array(pr.bodyEmbedding).buffer) 
+            : null;
+            
           stmt.run(
             pr.id,
             pr.prId,
@@ -1319,7 +1393,9 @@ export class SQLiteClient {
             pr.createdAt,
             pr.mergedAt || null,
             pr.url,
-            pr.body || null
+            pr.body || null,
+            titleEmbeddingBlob,
+            bodyEmbeddingBlob
           );
           success++;
         } catch (error) {
@@ -1503,6 +1579,13 @@ export class SQLiteClient {
    */
   isConnectedToDatabase(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Checks if vector operations are enabled.
+   */
+  get isVectorEnabled(): boolean {
+    return this.vectorEnabled;
   }
 
   // ============================================================================
@@ -1994,657 +2077,227 @@ export class SQLiteClient {
     const date = new Date(dateString);
     return date instanceof Date && !isNaN(date.getTime()) && date.toISOString() === dateString;
   }
-}
 
-/**
- * Client for TinkerGraph (Graph Database) using Gremlin.
- */
-export class TinkerGraphClient {
-  private g: GraphTraversalSource | null = null;
-  private connection: DriverRemoteConnection | null = null;
-  private logger = getLogger('TinkerGraphClient');
-  private isConnected = false;
-  private circuitBreaker = new CircuitBreaker(5, 60000);
-  private vertexCache = new Map<string, any>(); // Cache for created vertices
-  private maxRetries = 3;
-  private retryDelay = 1000;
+  // ============================================================================
+  // VECTOR SEARCH OPERATIONS (sqlite-vec integration)
+  // ============================================================================
 
   /**
-   * Initializes the TinkerGraph client.
-   * @param {string} url - The WebSocket URL for the Gremlin server (e.g., 'ws://localhost:8182/gremlin').
+   * Stores a vector for a specific record.
+   * @param {string} table - The table name (files, functions, commits, etc.)
+   * @param {string} column - The embedding column name
+   * @param {string} recordId - The record ID to update
+   * @param {number[]} embedding - The embedding vector
+   * @returns {Promise<void>}
    */
-  constructor(private url: string) {
-    this.logger.info(`Initializing TinkerGraph client`, { url });
-  }
-
-  /**
-   * Establishes a connection to the TinkerGraph database with retry logic and circuit breaker.
-   */
-  async connect(): Promise<void> {
-    if (this.isConnected) {
-      this.logger.debug('Already connected to TinkerGraph');
-      return;
-    }
-
-    try {
-      await this.circuitBreaker.execute(async () => {
-        await withRetry(
-          async () => {
-            this.logger.info('Connecting to TinkerGraph', { url: this.url });
-            
-            // Validate connection URL before proceeding
-            this.validateConnectionUrl();
-            
-            // Mock implementation for development - no actual server required
-            // TODO: Replace with actual Gremlin connection when server is available
-            this.connection = { 
-              close: async () => {
-                this.logger.debug('Closing TinkerGraph connection');
-              }
-            };
-            
-            this.g = this.createMockGraphTraversalSource();
-            this.isConnected = true;
-            this.vertexCache.clear();
-            
-            this.logger.info('Connected to TinkerGraph successfully');
-          },
-          DEFAULT_RETRY_CONFIG,
-          this.logger,
-          'TinkerGraph connection'
-        );
-      });
-    } catch (error) {
-      this.logger.error('Failed to connect to TinkerGraph after retries', { 
-        error: getErrorMessage(error),
-        circuitBreakerState: this.circuitBreaker.getState()
-      });
-      throw new DatabaseConnectionError('TinkerGraph', `Connection failed: ${getErrorMessage(error)}`, error);
-    }
-  }
-
-  /**
-   * Validates the connection URL format.
-   */
-  private validateConnectionUrl(): void {
-    if (!this.url || typeof this.url !== 'string') {
-      throw new Error('TinkerGraph URL is required and must be a string');
-    }
-    
-    if (!this.url.startsWith('ws://') && !this.url.startsWith('wss://')) {
-      throw new Error('Invalid TinkerGraph URL: must start with ws:// or wss://');
-    }
-    
-    this.logger.debug('TinkerGraph URL validation passed', { url: this.url });
-  }
-
-  /**
-   * Delay utility for retry logic.
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Creates a mock GraphTraversalSource for development.
-   */
-  private createMockGraphTraversalSource(): GraphTraversalSource {
-    return {
-      addV: (label: string) => this.createMockVertexTraversal(label),
-      V: (id?: string) => this.createMockVertexTraversal('', id)
-    };
-  }
-
-  /**
-   * Creates a mock vertex traversal for development.
-   */
-  private createMockVertexTraversal(label: string, id?: string): VertexTraversal {
-    const properties: Record<string, any> = {};
-    
-    return {
-      property: (key: string, value: any) => {
-        properties[key] = value;
-        return this.createMockVertexTraversal(label, id);
-      },
-      next: async () => {
-        const vertexId = id || `mock-${label}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const vertex = { id: vertexId, label, properties: { ...properties } };
-        
-        // Cache the vertex for edge creation
-        if (!id) {
-          this.vertexCache.set(vertexId, vertex);
-        }
-        
-        return { value: vertex };
-      },
-      addE: (edgeLabel: string) => this.createMockEdgeTraversal(id || '', edgeLabel)
-    };
-  }
-
-  /**
-   * Creates a mock edge traversal for development.
-   */
-  private createMockEdgeTraversal(fromId: string, label: string): EdgeTraversal {
-    const properties: Record<string, any> = {};
-    
-    return {
-      to: (target: VertexTraversal) => {
-        return this.createMockEdgeTraversal(fromId, label);
-      },
-      property: (key: string, value: any) => {
-        properties[key] = value;
-        return this.createMockEdgeTraversal(fromId, label);
-      },
-      next: async () => {
-        const edgeId = `mock-edge-${label}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const edge = { 
-          id: edgeId, 
-          label, 
-          properties: { ...properties },
-          from: fromId,
-          to: 'target-vertex-id' // In real implementation, this would be resolved
-        };
-        return { value: edge };
-      }
-    };
-  }
-
-
-
-  /**
-   * Disconnects from the TinkerGraph database.
-   */
-  async disconnect(): Promise<void> {
+  async storeVector(table: string, column: string, recordId: string, embedding: number[]): Promise<void> {
     if (!this.isConnected) {
-      this.logger.debug('Already disconnected from TinkerGraph');
+      throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
+    }
+
+    if (!this.vectorEnabled) {
+      this.logger.warn('Vector operations not available, skipping embedding storage', { table, recordId });
       return;
     }
 
     try {
-      this.logger.info('Disconnecting from TinkerGraph');
+      // Convert embedding array to binary format for sqlite-vec
+      const embeddingBlob = Buffer.from(new Float32Array(embedding).buffer);
       
-      if (this.connection?.close) {
-        await this.connection.close();
+      const sql = `UPDATE ${table} SET ${column} = ? WHERE ${this.getIdColumn(table)} = ?`;
+      this.run(sql, [embeddingBlob, recordId]);
+      
+      this.logger.debug(`Stored embedding for ${table}.${recordId}`, { 
+        embeddingDimensions: embedding.length,
+        column 
+      });
+    } catch (error) {
+      this.logger.error(`Failed to store embedding for ${table}.${recordId}`, { 
+        error: getErrorMessage(error),
+        column 
+      });
+      throw new DatabaseOperationError('SQLite', 'storeEmbedding', getErrorMessage(error), error);
+    }
+  }
+
+  /**
+   * Performs vector similarity search using sqlite-vec.
+   * @param {string} table - The table to search in
+   * @param {string} column - The embedding column to search
+   * @param {number[]} queryEmbedding - The query embedding vector
+   * @param {number} limit - Maximum number of results to return
+   * @param {number} threshold - Similarity threshold (optional)
+   * @returns {Promise<Array<{id: string, similarity: number, data: any}>>}
+   */
+  async vectorSearch(
+    table: string, 
+    column: string, 
+    queryEmbedding: number[], 
+    limit: number = 10,
+    threshold?: number
+  ): Promise<Array<{id: string, similarity: number, data: any}>> {
+    if (!this.isConnected) {
+      throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
+    }
+
+    if (!this.vectorEnabled) {
+      this.logger.warn('Vector operations not available, returning empty results', { table, column });
+      return [];
+    }
+
+    try {
+      const queryBlob = Buffer.from(new Float32Array(queryEmbedding).buffer);
+      const idColumn = this.getIdColumn(table);
+      
+      let sql = `
+        SELECT ${idColumn}, 
+               vec_distance_cosine(${column}, ?) as similarity,
+               *
+        FROM ${table} 
+        WHERE ${column} IS NOT NULL
+      `;
+      
+      const params: any[] = [queryBlob];
+      
+      if (threshold !== undefined) {
+        // Convert similarity threshold to distance threshold (1 - similarity)
+        const distanceThreshold = 1 - threshold;
+        sql += ` AND vec_distance_cosine(${column}, ?) <= ?`;
+        params.push(queryBlob, distanceThreshold);
       }
       
-      this.connection = null;
-      this.g = null;
-      this.isConnected = false;
-      this.vertexCache.clear();
+      sql += ` ORDER BY similarity ASC LIMIT ?`;
+      params.push(limit);
+
+      const results = this.all(sql, params);
       
-      this.logger.info('Disconnected from TinkerGraph successfully');
+      return results.map(row => ({
+        id: row[idColumn],
+        similarity: 1 - row.similarity, // Convert distance to similarity
+        data: row
+      }));
+      
     } catch (error) {
-      this.logger.error('Failed to disconnect from TinkerGraph', { error: getErrorMessage(error) });
+      this.logger.error(`Vector search failed for ${table}.${column}`, { 
+        error: getErrorMessage(error),
+        queryDimensions: queryEmbedding.length 
+      });
+      throw new DatabaseOperationError('SQLite', 'vectorSearch', getErrorMessage(error), error);
+    }
+  }
+
+  /**
+   * Performs semantic search across multiple tables and embedding types.
+   * @param {number[]} queryEmbedding - The query embedding vector
+   * @param {number} limit - Maximum number of results per table
+   * @returns {Promise<{files: any[], functions: any[], commits: any[], pullRequests: any[]}>}
+   */
+  async semanticSearch(queryEmbedding: number[], limit: number = 5): Promise<{
+    files: any[];
+    functions: any[];
+    commits: any[];
+    pullRequests: any[];
+  }> {
+    try {
+      const [files, functions, commits, pullRequests] = await Promise.all([
+        this.vectorSearch('files', 'content_embedding', queryEmbedding, limit),
+        this.vectorSearch('functions', 'signature_embedding', queryEmbedding, limit),
+        this.vectorSearch('commits', 'message_embedding', queryEmbedding, limit),
+        this.vectorSearch('pull_requests', 'title_embedding', queryEmbedding, limit)
+      ]);
+
+      return { files, functions, commits, pullRequests };
+    } catch (error) {
+      this.logger.error('Semantic search failed', { error: getErrorMessage(error) });
       throw error;
     }
   }
 
   /**
-   * Returns the Gremlin GraphTraversalSource for executing graph traversals.
-   * @returns {GraphTraversalSource} The Gremlin traversal source.
+   * Batch stores embeddings for multiple records.
+   * @param {string} table - The table name
+   * @param {string} column - The embedding column name
+   * @param {Array<{id: string, embedding: number[]}>} records - Records with embeddings
+   * @returns {Promise<{success: number, failed: number, errors: string[]}>}
    */
-  getGraphTraversalSource(): GraphTraversalSource {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
+  async batchStoreEmbeddings(
+    table: string, 
+    column: string, 
+    records: Array<{id: string, embedding: number[]}>
+  ): Promise<{success: number, failed: number, errors: string[]}> {
+    if (!this.isConnected) {
+      throw new DatabaseConnectionError('SQLite', 'Not connected to SQLite. Call connect() first.');
     }
 
-    this.logger.debug('Getting TinkerGraph traversal source');
-    return this.g;
-  }
-
-  /**
-   * Adds a vertex to the graph with retry logic.
-   * @param {string} label - The vertex label.
-   * @param {Record<string, any>} properties - The vertex properties.
-   * @returns {Promise<any>} The created vertex.
-   */
-  async addVertex(label: string, properties: Record<string, any>): Promise<any> {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
+    if (!records || records.length === 0) {
+      return { success: 0, failed: 0, errors: [] };
     }
 
-    let lastError: Error | null = null;
-    
-    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      try {
-        this.logger.debug(`Adding vertex: ${label} (attempt ${attempt}/${this.maxRetries})`, { properties });
-        
-        let traversal = this.g.addV(label);
-        
-        // Add properties to the vertex
-        for (const [key, value] of Object.entries(properties)) {
-          if (value !== undefined && value !== null) {
-            traversal = traversal.property(key, value);
-          }
-        }
-        
-        const result = await traversal.next();
-        const vertex = result.value;
-        
-        // Cache the vertex for potential edge creation
-        this.vertexCache.set(vertex.id, vertex);
-        
-        this.logger.debug(`Successfully added vertex: ${label}`, { vertexId: vertex.id });
-        return vertex;
-        
-      } catch (error) {
-        lastError = error as Error;
-        this.logger.warn(`Failed to add vertex: ${label} (attempt ${attempt})`, { 
-          error: getErrorMessage(error),
-          attempt,
-          maxRetries: this.maxRetries
-        });
-        
-        if (attempt < this.maxRetries) {
-          await this.delay(this.retryDelay);
-        }
-      }
-    }
-    
-    this.logger.error(`Failed to add vertex: ${label} after all retries`, { 
-      error: getErrorMessage(lastError),
-      maxRetries: this.maxRetries
-    });
-    throw lastError || new Error(`Failed to add vertex: ${label}`);
-  }
+    this.logger.info(`Starting batch embedding storage for ${records.length} records in ${table}.${column}`);
 
-  /**
-   * Adds an edge to the graph with retry logic and vertex validation.
-   * @param {string} fromVertexId - The source vertex ID.
-   * @param {string} toVertexId - The target vertex ID.
-   * @param {string} label - The edge label.
-   * @param {Record<string, any>} properties - The edge properties.
-   * @returns {Promise<any>} The created edge.
-   */
-  async addEdge(
-    fromVertexId: string, 
-    toVertexId: string, 
-    label: string, 
-    properties: Record<string, any> = {}
-  ): Promise<any> {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
-    }
-
-    let lastError: Error | null = null;
-    
-    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      try {
-        this.logger.debug(`Adding edge: ${fromVertexId} -[${label}]-> ${toVertexId} (attempt ${attempt}/${this.maxRetries})`, { properties });
-        
-        // Validate that both vertices exist
-        const fromV = await this.g.V(fromVertexId).next();
-        const toV = await this.g.V(toVertexId).next();
-
-        if (!fromV.value) {
-          throw new Error(`Source vertex not found: ${fromVertexId}`);
-        }
-        
-        if (!toV.value) {
-          throw new Error(`Target vertex not found: ${toVertexId}`);
-        }
-
-        // Create the edge
-        let traversal = this.g.V(fromVertexId).addE(label).to(this.g.V(toVertexId));
-        
-        // Add properties to the edge
-        for (const [key, value] of Object.entries(properties)) {
-          if (value !== undefined && value !== null) {
-            traversal = traversal.property(key, value);
-          }
-        }
-        
-        const result = await traversal.next();
-        const edge = result.value;
-        
-        this.logger.debug(`Successfully added edge: ${label}`, { 
-          edgeId: edge.id,
-          from: fromVertexId,
-          to: toVertexId
-        });
-        return edge;
-        
-      } catch (error) {
-        lastError = error as Error;
-        this.logger.warn(`Failed to add edge: ${label} (attempt ${attempt})`, { 
-          error: getErrorMessage(error),
-          from: fromVertexId,
-          to: toVertexId,
-          attempt,
-          maxRetries: this.maxRetries
-        });
-        
-        if (attempt < this.maxRetries) {
-          await this.delay(this.retryDelay);
-        }
-      }
-    }
-    
-    this.logger.error(`Failed to add edge: ${label} after all retries`, { 
-      error: getErrorMessage(lastError),
-      from: fromVertexId,
-      to: toVertexId,
-      maxRetries: this.maxRetries
-    });
-    throw lastError || new Error(`Failed to add edge: ${label}`);
-  }
-
-  /**
-   * Batch creates vertices for all node types with error handling.
-   * @param {BaseNode[]} nodes - Array of nodes to create as vertices.
-   * @returns {Promise<{success: number, failed: number, errors: string[], vertices: any[]}>} Batch operation results.
-   */
-  async batchCreateVertices(nodes: BaseNode[]): Promise<{
-    success: number;
-    failed: number;
-    errors: string[];
-    vertices: any[];
-  }> {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
-    }
-
-    if (!nodes || nodes.length === 0) {
-      return { success: 0, failed: 0, errors: [], vertices: [] };
-    }
-
-    this.logger.info(`Starting batch vertex creation`, { totalNodes: nodes.length });
+    const idColumn = this.getIdColumn(table);
+    const stmt = this.db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${idColumn} = ?`);
 
     let success = 0;
     let failed = 0;
     const errors: string[] = [];
-    const vertices: any[] = [];
 
-    // Process nodes in batches to avoid overwhelming the server
-    const batchSize = 50;
-    for (let i = 0; i < nodes.length; i += batchSize) {
-      const batch = nodes.slice(i, i + batchSize);
-      
-      for (const node of batch) {
+    const updateMany = this.db.transaction((recordList: typeof records) => {
+      for (const record of recordList) {
         try {
-          const vertex = await this.addVertex(node.type, {
-            nodeId: node.id,
-            ...node.properties
-          });
-          
-          vertices.push(vertex);
+          const embeddingBlob = Buffer.from(new Float32Array(record.embedding).buffer);
+          stmt.run(embeddingBlob, record.id);
           success++;
-          
         } catch (error) {
           failed++;
-          const errorMsg = `Failed to create vertex for node ${node.id} (${node.type}): ${getErrorMessage(error)}`;
+          const errorMsg = `Failed to store embedding for ${record.id}: ${getErrorMessage(error)}`;
           errors.push(errorMsg);
           this.logger.warn(errorMsg);
         }
       }
-      
-      // Small delay between batches to prevent overwhelming the server
-      if (i + batchSize < nodes.length) {
-        await this.delay(100);
-      }
-    }
-
-    this.logger.info(`Batch vertex creation completed`, { 
-      success, 
-      failed, 
-      total: nodes.length,
-      errorCount: errors.length
     });
 
-    return { success, failed, errors, vertices };
-  }
-
-  /**
-   * Batch creates edges with proper error handling and vertex validation.
-   * @param {Edge[]} edges - Array of edges to create.
-   * @returns {Promise<{success: number, failed: number, errors: string[], edges: any[]}>} Batch operation results.
-   */
-  async batchCreateEdges(edges: Edge[]): Promise<{
-    success: number;
-    failed: number;
-    errors: string[];
-    edges: any[];
-  }> {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
-    }
-
-    if (!edges || edges.length === 0) {
-      return { success: 0, failed: 0, errors: [], edges: [] };
-    }
-
-    this.logger.info(`Starting batch edge creation`, { totalEdges: edges.length });
-
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
-    const createdEdges: any[] = [];
-
-    // Process edges in batches
-    const batchSize = 50;
-    for (let i = 0; i < edges.length; i += batchSize) {
-      const batch = edges.slice(i, i + batchSize);
-      
-      for (const edge of batch) {
-        try {
-          const createdEdge = await this.addEdge(
-            edge.source,
-            edge.target,
-            edge.type,
-            edge.properties || {}
-          );
-          
-          createdEdges.push(createdEdge);
-          success++;
-          
-        } catch (error) {
-          failed++;
-          const errorMsg = `Failed to create edge ${edge.source} -[${edge.type}]-> ${edge.target}: ${getErrorMessage(error)}`;
-          errors.push(errorMsg);
-          this.logger.warn(errorMsg);
-        }
-      }
-      
-      // Small delay between batches
-      if (i + batchSize < edges.length) {
-        await this.delay(100);
-      }
-    }
-
-    this.logger.info(`Batch edge creation completed`, { 
-      success, 
-      failed, 
-      total: edges.length,
-      errorCount: errors.length
-    });
-
-    return { success, failed, errors, edges: createdEdges };
-  }
-
-  /**
-   * Creates vertices for specific node types with optimized properties.
-   * @param {RepositoryNode[]} repositories - Repository nodes to create.
-   * @returns {Promise<{success: number, failed: number, errors: string[], vertices: any[]}>}
-   */
-  async batchCreateRepositoryVertices(repositories: RepositoryNode[]): Promise<{
-    success: number;
-    failed: number;
-    errors: string[];
-    vertices: any[];
-  }> {
-    this.logger.info(`Creating repository vertices`, { count: repositories.length });
-    
-    const vertices: any[] = [];
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
-
-    for (const repo of repositories) {
-      try {
-        const vertex = await this.addVertex('Repository', {
-          nodeId: repo.id,
-          repoPath: repo.properties.repoPath,
-          repoName: repo.properties.repoName,
-          createdAt: repo.properties.createdAt,
-          lastUpdated: repo.properties.lastUpdated
-        });
-        
-        vertices.push(vertex);
-        success++;
-      } catch (error) {
-        failed++;
-        const errorMsg = `Failed to create repository vertex ${repo.id}: ${getErrorMessage(error)}`;
-        errors.push(errorMsg);
-        this.logger.warn(errorMsg);
-      }
-    }
-
-    return { success, failed, errors, vertices };
-  }
-
-  /**
-   * Creates vertices for file nodes with optimized properties.
-   * @param {FileNode[]} files - File nodes to create.
-   * @returns {Promise<{success: number, failed: number, errors: string[], vertices: any[]}>}
-   */
-  async batchCreateFileVertices(files: FileNode[]): Promise<{
-    success: number;
-    failed: number;
-    errors: string[];
-    vertices: any[];
-  }> {
-    this.logger.info(`Creating file vertices`, { count: files.length });
-    
-    const vertices: any[] = [];
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
-
-    for (const file of files) {
-      try {
-        const vertex = await this.addVertex('File', {
-          nodeId: file.id,
-          filePath: file.properties.filePath,
-          fileName: file.properties.fileName,
-          fileExtension: file.properties.fileExtension,
-          repoId: file.properties.repoId,
-          language: file.properties.language,
-          sizeKb: file.properties.sizeKb,
-          contentHash: file.properties.contentHash,
-          fileType: file.properties.fileType,
-          aiSummary: file.properties.aiSummary,
-          imports: file.properties.imports ? JSON.stringify(file.properties.imports) : null,
-          exports: file.properties.exports ? JSON.stringify(file.properties.exports) : null
-        });
-        
-        vertices.push(vertex);
-        success++;
-      } catch (error) {
-        failed++;
-        const errorMsg = `Failed to create file vertex ${file.id}: ${getErrorMessage(error)}`;
-        errors.push(errorMsg);
-        this.logger.warn(errorMsg);
-      }
-    }
-
-    return { success, failed, errors, vertices };
-  }
-
-  /**
-   * Creates vertices for function nodes with optimized properties.
-   * @param {FunctionNode[]} functions - Function nodes to create.
-   * @returns {Promise<{success: number, failed: number, errors: string[], vertices: any[]}>}
-   */
-  async batchCreateFunctionVertices(functions: FunctionNode[]): Promise<{
-    success: number;
-    failed: number;
-    errors: string[];
-    vertices: any[];
-  }> {
-    this.logger.info(`Creating function vertices`, { count: functions.length });
-    
-    const vertices: any[] = [];
-    let success = 0;
-    let failed = 0;
-    const errors: string[] = [];
-
-    for (const func of functions) {
-      try {
-        const vertex = await this.addVertex('Function', {
-          nodeId: func.id,
-          name: func.properties.name,
-          signature: func.properties.signature,
-          returnType: func.properties.returnType,
-          accessLevel: func.properties.accessLevel,
-          fileId: func.properties.fileId,
-          filePath: func.properties.filePath,
-          startLine: func.properties.startLine,
-          endLine: func.properties.endLine,
-          body: func.properties.body,
-          calledByMethods: JSON.stringify(func.properties.calledByMethods),
-          callsMethods: JSON.stringify(func.properties.callsMethods),
-          usesExternalMethods: func.properties.usesExternalMethods,
-          internalCallGraph: JSON.stringify(func.properties.internalCallGraph),
-          transitiveCallDepth: func.properties.transitiveCallDepth
-        });
-        
-        vertices.push(vertex);
-        success++;
-      } catch (error) {
-        failed++;
-        const errorMsg = `Failed to create function vertex ${func.id}: ${getErrorMessage(error)}`;
-        errors.push(errorMsg);
-        this.logger.warn(errorMsg);
-      }
-    }
-
-    return { success, failed, errors, vertices };
-  }
-
-  /**
-   * Validates connection and reconnects if necessary.
-   * @returns {Promise<boolean>} True if connected, false otherwise.
-   */
-  async ensureConnection(): Promise<boolean> {
-    if (this.isConnected && this.g) {
-      return true;
-    }
-
     try {
-      await this.connect();
-      return true;
+      updateMany(records);
+      this.logger.info(`Batch stored embeddings`, { success, failed, total: records.length });
     } catch (error) {
-      this.logger.error('Failed to ensure connection', { error: getErrorMessage(error) });
-      return false;
-    }
-  }
-
-  /**
-   * Gets statistics about the graph database.
-   * @returns {Promise<{vertexCount: number, edgeCount: number}>} Graph statistics.
-   */
-  async getGraphStats(): Promise<{vertexCount: number, edgeCount: number}> {
-    if (!this.isConnected || !this.g) {
-      throw new Error('Not connected to TinkerGraph. Call connect() first.');
-    }
-
-    try {
-      // Mock implementation - in real TinkerGraph, this would query actual counts
-      const vertexCount = this.vertexCache.size;
-      const edgeCount = 0; // Would be tracked separately in real implementation
-      
-      this.logger.debug('Retrieved graph statistics', { vertexCount, edgeCount });
-      return { vertexCount, edgeCount };
-    } catch (error) {
-      this.logger.error('Failed to get graph statistics', { error: getErrorMessage(error) });
+      this.logger.error('Batch embedding storage transaction failed', { error: getErrorMessage(error) });
       throw error;
     }
+
+    return { success, failed, errors };
   }
 
   /**
-   * Checks if the client is connected.
+   * Gets the appropriate ID column name for a table.
+   * @param {string} table - The table name
+   * @returns {string} The ID column name
    */
-  isConnectedToDatabase(): boolean {
-    return this.isConnected;
+  private getIdColumn(table: string): string {
+    switch (table) {
+      case 'files':
+        return 'file_id';
+      case 'repositories':
+        return 'repo_id';
+      case 'functions':
+      case 'commits':
+      case 'pull_requests':
+      case 'directories':
+      case 'code_nodes':
+      case 'test_nodes':
+        return 'id';
+      default:
+        return 'id';
+    }
+  }
+
+  /**
+   * Checks if sqlite-vec extension is available and working.
+   * @returns {Promise<boolean>} True if vector operations are available
+   */
+  async isVectorSearchAvailable(): Promise<boolean> {
+    return this.vectorEnabled;
   }
 }
+
+

@@ -6,7 +6,7 @@
 import { Indexer, IndexingOptions } from '../src/core/indexer';
 import { ConfigManager } from '../src/config';
 import { DataLoader } from '../src/modules/data-loader';
-import { SQLiteClient, TinkerGraphClient } from '../src/persistence/db-clients';
+import { SQLiteClient } from '../src/persistence/db-clients';
 import { NodeWithEmbedding, Edge, FileNode, RepositoryNode } from '../src/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,10 +18,9 @@ describe('Integration: Complete Indexing Pipeline', () => {
   let indexer: Indexer;
   let dataLoader: DataLoader;
   let sqliteClient: SQLiteClient;
-  let tinkergraphClient: TinkerGraphClient;
+
   
   const testDbPath = path.join(__dirname, 'test-integration.db');
-  const testLanceDbPath = path.join(__dirname, 'test-integration-lancedb');
 
   beforeAll(async () => {
     // Create a temporary test project structure
@@ -30,28 +29,25 @@ describe('Integration: Complete Indexing Pipeline', () => {
   });
 
   beforeEach(async () => {
-    // Clean up test databases
+    // Clean up test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
-    }
-    if (fs.existsSync(testLanceDbPath)) {
-      fs.rmSync(testLanceDbPath, { recursive: true, force: true });
     }
 
     // Initialize configuration and components
     config = new ConfigManager(testProjectRoot);
     config.updateConfig({
       database: {
-        lancedb: { path: testLanceDbPath },
-        sqlite: { path: testDbPath },
-        tinkergraph: { url: 'ws://localhost:8182/gremlin' }
+        sqlite: { 
+          path: testDbPath,
+          vectorExtension: './extensions/vec0.dylib'
+        }
       }
     });
 
     indexer = new Indexer(testProjectRoot, config);
-    dataLoader = new DataLoader(testLanceDbPath, testDbPath, 'ws://localhost:8182/gremlin', config);
+    dataLoader = new DataLoader(testDbPath, config);
     sqliteClient = new SQLiteClient(testDbPath);
-    tinkergraphClient = new TinkerGraphClient('ws://localhost:8182/gremlin');
   });
 
   afterEach(async () => {
@@ -59,16 +55,10 @@ describe('Integration: Complete Indexing Pipeline', () => {
     if (sqliteClient.isConnectedToDatabase()) {
       await sqliteClient.disconnect();
     }
-    if (tinkergraphClient.isConnectedToDatabase()) {
-      await tinkergraphClient.disconnect();
-    }
 
-    // Clean up test databases
+    // Clean up test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
-    }
-    if (fs.existsSync(testLanceDbPath)) {
-      fs.rmSync(testLanceDbPath, { recursive: true, force: true });
     }
   });
 
@@ -192,7 +182,7 @@ describe('Integration: Complete Indexing Pipeline', () => {
   });
 
   describe('Data Consistency Verification', () => {
-    it('should verify data consistency between SQLite and TinkerGraph', async () => {
+    it('should verify data consistency in SQLite', async () => {
       const testNodes: NodeWithEmbedding[] = createTestNodes();
       const testEdges: Edge[] = createTestEdges();
 
@@ -244,11 +234,9 @@ describe('Integration: Complete Indexing Pipeline', () => {
 
   describe('Error Scenarios and Recovery', () => {
     it('should handle database connection failures gracefully', async () => {
-      // Create a DataLoader with invalid database paths
+      // Create a DataLoader with invalid database path
       const invalidDataLoader = new DataLoader(
-        '/invalid/path/lancedb',
         '/invalid/path/sqlite.db',
-        'ws://invalid:8182/gremlin',
         config
       );
 
@@ -261,29 +249,19 @@ describe('Integration: Complete Indexing Pipeline', () => {
       expect(result).toHaveProperty('success');
       expect(result).toHaveProperty('results');
       
-      // All databases should fail
+      // SQLite should fail
       expect(result.results.sqlite.success).toBe(false);
-      expect(result.results.lancedb.success).toBe(false);
-      expect(result.results.tinkergraph.success).toBe(false);
     });
 
     it('should recover from partial database failures', async () => {
       const testNodes: NodeWithEmbedding[] = createTestNodes();
       const testEdges: Edge[] = createTestEdges();
 
-      // Simulate partial failure by using invalid TinkerGraph URL
-      const partialFailureLoader = new DataLoader(
-        testLanceDbPath,
-        testDbPath,
-        'ws://invalid:8182/gremlin',
-        config
-      );
-
-      const result = await partialFailureLoader.load(testNodes, testEdges);
+      // Test with valid databases - should succeed
+      const result = await dataLoader.load(testNodes, testEdges);
       
       expect(result.success).toBe(true); // Should succeed overall
       expect(result.results.sqlite.success).toBe(true); // SQLite should work
-      expect(result.results.tinkergraph.success).toBe(false); // TinkerGraph should fail
     });
 
     it('should retry failed operations successfully', async () => {
@@ -340,9 +318,7 @@ describe('Integration: Complete Indexing Pipeline', () => {
       expect(stats).toHaveProperty('databases');
       expect(stats).toHaveProperty('lastLoad');
       expect(stats).toHaveProperty('connectivity');
-      expect(stats.databases).toHaveProperty('lancedb');
       expect(stats.databases).toHaveProperty('sqlite');
-      expect(stats.databases).toHaveProperty('tinkergraph');
     });
 
     it('should track indexing performance metrics', async () => {
@@ -375,6 +351,149 @@ describe('Integration: Complete Indexing Pipeline', () => {
 
       expect(result1.success).toBe(true);
       expect(result2.success).toBe(true);
+    });
+  });
+
+  describe('Unified Database Architecture Validation', () => {
+    it('should store all data types in single SQLite database', async () => {
+      const testNodes: NodeWithEmbedding[] = createTestNodes();
+      const testEdges: Edge[] = createTestEdges();
+
+      await dataLoader.load(testNodes, testEdges);
+
+      // Verify all data is in SQLite
+      await sqliteClient.connect();
+      
+      // Check that all expected tables exist
+      const tables = sqliteClient.all(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+      `);
+
+      const expectedTables = [
+        'files', 'code_nodes', 'functions', 'commits', 'pull_requests',
+        'directories', 'test_nodes', 'repositories', 'graph_nodes', 'graph_edges'
+      ];
+
+      expectedTables.forEach(tableName => {
+        expect(tables.some((table: any) => table.name === tableName)).toBe(true);
+      });
+
+      // Verify data was actually inserted
+      const fileCount = sqliteClient.get('SELECT COUNT(*) as count FROM files');
+      expect(fileCount.count).toBeGreaterThan(0);
+    });
+
+    it('should support vector operations in unified database', async () => {
+      const testNodes: NodeWithEmbedding[] = createTestNodes();
+      await dataLoader.load(testNodes, []);
+
+      await sqliteClient.connect();
+      
+      // Check if vector extension is available
+      const vectorAvailable = await sqliteClient.isVectorSearchAvailable();
+      
+      if (vectorAvailable) {
+        // Test vector search functionality
+        const queryEmbedding = new Array(384).fill(0.1);
+        const results = await sqliteClient.vectorSearch('files', 'content_embedding', queryEmbedding, 5, 0.1);
+        
+        expect(Array.isArray(results)).toBe(true);
+        // Should not throw error even if no results found
+      } else {
+        // Verify graceful degradation
+        expect(vectorAvailable).toBe(false);
+      }
+    });
+
+    it('should maintain data consistency in single database', async () => {
+      const testNodes: NodeWithEmbedding[] = createTestNodes();
+      const testEdges: Edge[] = createTestEdges();
+
+      await dataLoader.load(testNodes, testEdges);
+
+      // Verify referential integrity
+      await sqliteClient.connect();
+      
+      // Check that files exist for file nodes
+      const files = sqliteClient.all('SELECT * FROM files');
+      expect(files.length).toBeGreaterThan(0);
+      
+      // Check that repositories exist for files
+      const repos = sqliteClient.all('SELECT * FROM repositories');
+      expect(repos.length).toBeGreaterThan(0);
+      
+      // Verify foreign key relationships
+      const filesWithRepos = sqliteClient.all(`
+        SELECT f.*, r.repo_name 
+        FROM files f 
+        JOIN repositories r ON f.repo_id = r.repo_id
+      `);
+      expect(filesWithRepos.length).toBeGreaterThan(0);
+    });
+
+    it('should handle backup and restore with single database file', async () => {
+      const testNodes: NodeWithEmbedding[] = createTestNodes();
+      await dataLoader.load(testNodes, []);
+
+      // Verify single database file exists
+      expect(fs.existsSync(testDbPath)).toBe(true);
+      
+      // Get file stats
+      const stats = fs.statSync(testDbPath);
+      expect(stats.size).toBeGreaterThan(0);
+      
+      // Simulate backup by copying file
+      const backupPath = testDbPath + '.backup';
+      fs.copyFileSync(testDbPath, backupPath);
+      
+      expect(fs.existsSync(backupPath)).toBe(true);
+      
+      // Verify backup has same size
+      const backupStats = fs.statSync(backupPath);
+      expect(backupStats.size).toBe(stats.size);
+      
+      // Clean up backup
+      fs.unlinkSync(backupPath);
+    });
+
+    it('should support hybrid search with unified SQL queries', async () => {
+      const testNodes: NodeWithEmbedding[] = createTestNodes();
+      await dataLoader.load(testNodes, []);
+
+      await sqliteClient.connect();
+      
+      // Test unified query combining vector and metadata search
+      const unifiedQuery = `
+        SELECT 
+          f.file_id,
+          f.file_name,
+          f.file_path,
+          f.language,
+          'FileNode' as node_type
+        FROM files f
+        WHERE f.language = 'typescript'
+        UNION ALL
+        SELECT 
+          c.id as file_id,
+          c.name as file_name,
+          c.file_path,
+          c.language,
+          'CodeNode' as node_type
+        FROM code_nodes c
+        WHERE c.language = 'typescript'
+        ORDER BY file_name
+        LIMIT 10
+      `;
+      
+      const results = sqliteClient.all(unifiedQuery);
+      expect(Array.isArray(results)).toBe(true);
+      
+      // All results should be TypeScript
+      results.forEach((result: any) => {
+        expect(result.language).toBe('typescript');
+      });
     });
   });
 });

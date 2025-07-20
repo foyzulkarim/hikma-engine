@@ -135,7 +135,6 @@ deploy_staging() {
     # Use production compose file but with staging overrides
     export HIKMA_API_PORT=3001
     export REDIS_PORT=6380
-    export GREMLIN_PORT=8183
     
     docker-compose -f docker-compose.yml down
     docker-compose -f docker-compose.yml up -d

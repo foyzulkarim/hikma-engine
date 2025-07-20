@@ -56,7 +56,7 @@ architecture, advanced security, performance optimization, and full deployment s
 
 ### Deployment Infrastructure
 ```
-├── docker-compose.yml    # Production deployment with Redis/TinkerGraph
+├── docker-compose.yml    # Production deployment with Redis
 ├── k8s/                 # Kubernetes manifests with auto-scaling
 ├── scripts/             # Deployment automation and testing tools
 └── load-tests/          # Artillery performance testing suite
@@ -82,7 +82,7 @@ architecture, advanced security, performance optimization, and full deployment s
 - **Health endpoints**: Liveness, readiness, and detailed health status
 - **Performance metrics**: Response times, error rates, and system resources
 - **Request correlation**: End-to-end tracing with unique request IDs
-- **Database monitoring**: Connectivity checks for LanceDB, SQLite, TinkerGraph
+- **Database monitoring**: Connectivity checks for LanceDB, SQLite
 - **Production validation**: Automated readiness checks for deployment
 
 ## 🚀 Production Ready Features

@@ -68,9 +68,8 @@ All six core modules are implemented:
 #### 6. Database Clients (`src/persistence/db-clients.ts`)
 - **Status**: Fully implemented
 - **Features**:
-  - SQLite client with connection management
-  - LanceDB client for vector operations
-  - TinkerGraph client for graph operations
+  - SQLite client with connection management, graph operations, and vector support
+  - Unified storage using sqlite-vec extension for vector operations
   - Proper error handling and connection lifecycle management
 
 #### 7. Type System (`src/types/index.ts`)
@@ -129,7 +128,7 @@ The hikma-engine can currently:
 3. **Analyze Git history** for file evolution and commit patterns
 4. **Generate AI summaries** for files and directories
 5. **Create vector embeddings** for semantic similarity
-6. **Store data** across multiple database systems (SQLite, LanceDB, TinkerGraph)
+6. **Store data** in unified SQLite database with vector extension support
 7. **Perform incremental indexing** to process only changed files
 8. **Provide detailed logging** and performance metrics
 
@@ -138,8 +137,8 @@ The hikma-engine can currently:
 ### Core Dependencies
 - `@xenova/transformers`: AI model integration for embeddings
 - `better-sqlite3`: SQLite database operations
-- `gremlin`: Graph database operations
-- `@lancedb/lancedb`: Vector database operations
+
+- `sqlite-vec`: Vector extension for SQLite database operations
 - `glob`: File pattern matching
 - `simple-git`: Git repository analysis
 
@@ -154,9 +153,8 @@ The hikma-engine can currently:
 The system supports extensive configuration through:
 
 ### Database Configuration
-- SQLite path for relational data
-- LanceDB path for vector storage
-- TinkerGraph URL for graph operations
+- SQLite path for unified storage (metadata, graph, and vectors)
+- Vector extension path for sqlite-vec binary
 
 ### AI Configuration
 - Embedding model selection and batch size

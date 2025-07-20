@@ -145,15 +145,6 @@ export class HealthCheckService {
     const startTime = Date.now();
 
     try {
-      // Check LanceDB connectivity
-      const lanceDbCheck = await this.checkLanceDB();
-      checks.lancedb = {
-        status: lanceDbCheck.success ? 'pass' : 'fail',
-        message: lanceDbCheck.message,
-        responseTime: Date.now() - startTime,
-        details: lanceDbCheck.details,
-      };
-
       // Check SQLite connectivity
       const sqliteCheck = await this.checkSQLite();
       checks.sqlite = {
@@ -162,74 +153,73 @@ export class HealthCheckService {
         responseTime: Date.now() - startTime,
         details: sqliteCheck.details,
       };
-
-      // Check TinkerGraph connectivity
-      const tinkerGraphCheck = await this.checkTinkerGraph();
-      checks.tinkergraph = {
-        status: tinkerGraphCheck.success ? 'pass' : 'fail',
-        message: tinkerGraphCheck.message,
-        responseTime: Date.now() - startTime,
-        details: tinkerGraphCheck.details,
-      };
     } catch (error) {
       checks.database = {
         status: 'fail',
-        message: `Database connectivity check failed: ${error}`,
+        message: `SQLite database connectivity check failed: ${error}`,
         responseTime: Date.now() - startTime,
       };
     }
   }
 
-  private async checkLanceDB(): Promise<{ success: boolean; message: string; details?: any }> {
-    try {
-      // This would check LanceDB connectivity
-      // For now, we'll simulate the check
-      return {
-        success: true,
-        message: 'LanceDB connection successful',
-        details: { collections: 0 }, // Would be actual collection count
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `LanceDB connection failed: ${error}`,
-      };
-    }
-  }
+
 
   private async checkSQLite(): Promise<{ success: boolean; message: string; details?: any }> {
     try {
-      // This would check SQLite connectivity
-      // For now, we'll simulate the check
-      return {
-        success: true,
-        message: 'SQLite connection successful',
-        details: { tables: 0 }, // Would be actual table count
-      };
+      // Import and create a temporary SQLite client for health check
+      const { SQLiteClient } = await import('../../persistence/db-clients');
+      const { ConfigManager } = await import('../../config');
+      
+      // Create temporary config and client for health check
+      const config = new ConfigManager(process.cwd());
+      const dbConfig = config.getDatabaseConfig();
+      const sqliteClient = new SQLiteClient(dbConfig.sqlite.path);
+      
+      try {
+        // Test connection
+        await sqliteClient.connect();
+        
+        // Check if vector extension is available
+        const vectorAvailable = await sqliteClient.isVectorSearchAvailable();
+        
+        // Get basic stats
+        const stats = await sqliteClient.getIndexingStats();
+        
+        // Test basic query
+        const testResult = sqliteClient.get('SELECT 1 as test');
+        
+        return {
+          success: testResult?.test === 1,
+          message: vectorAvailable 
+            ? 'SQLite connection successful with vector support' 
+            : 'SQLite connection successful (vector extension not available)',
+          details: {
+            vectorExtensionAvailable: vectorAvailable,
+            totalFiles: stats.totalFiles || 0,
+            totalDirectories: stats.totalDirectories || 0,
+            totalCommits: stats.totalCommits || 0,
+            totalCodeNodes: stats.totalCodeNodes || 0,
+            isConnected: sqliteClient.isConnectedToDatabase()
+          },
+        };
+      } finally {
+        // Always clean up the test connection
+        if (sqliteClient.isConnectedToDatabase()) {
+          sqliteClient.disconnect();
+        }
+      }
     } catch (error) {
       return {
         success: false,
-        message: `SQLite connection failed: ${error}`,
+        message: `SQLite health check failed: ${error}`,
+        details: {
+          error: error instanceof Error ? error.message : String(error)
+        }
       };
     }
   }
 
-  private async checkTinkerGraph(): Promise<{ success: boolean; message: string; details?: any }> {
-    try {
-      // This would check TinkerGraph connectivity
-      // For now, we'll simulate the check
-      return {
-        success: true,
-        message: 'TinkerGraph connection successful',
-        details: { vertices: 0, edges: 0 }, // Would be actual counts
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `TinkerGraph connection failed: ${error}`,
-      };
-    }
-  }
+
 
   private async checkSearchService(checks: HealthStatus['checks']): Promise<void> {
     const startTime = Date.now();

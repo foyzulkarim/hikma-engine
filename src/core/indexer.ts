@@ -270,12 +270,11 @@ export class Indexer {
   }
 
   /**
-   * Persists data to the configured databases.
+   * Persists data to the unified SQLite database.
    */
   private async persistData(nodes: NodeWithEmbedding[], edges: Edge[]): Promise<void> {
     const dbConfig = this.config.getDatabaseConfig();
     const dataLoader = new DataLoader(
-      dbConfig.lancedb.path,
       dbConfig.sqlite.path,
       this.config
     );

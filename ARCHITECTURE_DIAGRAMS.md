@@ -29,9 +29,7 @@ graph TB
     N --> O[Multi-Database Storage]
     
     %% Storage Layer
-    O --> P[(SQLite<br/>Metadata)]
-    O --> Q[(LanceDB<br/>Vectors)]
-    O --> R[(TinkerGraph<br/>Relationships)]
+    O --> P[(SQLite + Vector Extension<br/>Unified Storage)]
     
     %% Configuration & Utilities
     S[ConfigManager] -.-> D
@@ -147,14 +145,10 @@ graph TD
     BBB -->|No| DDD[DataLoader.load()]
     
     %% Database Loading Detail
-    DDD --> EEE[Connect to Databases]
-    EEE --> FFF[SQLite Connection]
-    EEE --> GGG[LanceDB Connection]
-    EEE --> HHH[TinkerGraph Connection]
+    DDD --> EEE[Connect to Database]
+    EEE --> FFF[SQLite Connection with Vector Extension]
     
-    FFF --> III[Batch Load to SQLite]
-    GGG --> JJJ[Batch Load to LanceDB]
-    HHH --> KKK[Batch Load to TinkerGraph]
+    FFF --> III[Batch Load to SQLite<br/>Metadata + Vectors]
     
     III --> LLL[Disconnect All]
     JJJ --> LLL
@@ -218,12 +212,12 @@ graph LR
     X --> Z
     Y --> Z
     
-    V --> AA[(LanceDB Vector)]
+    V --> AA[(SQLite Vector Search)]
     W --> AA
     X --> AA
     Y --> AA
     
-    N --> BB[(TinkerGraph Edge)]
+    N --> BB[(SQLite Graph Edge)]
     O --> BB
     P --> BB
     Q --> BB
@@ -251,9 +245,7 @@ graph TB
     A --> G[DataLoader<br/>Persistence]
     
     %% Database Clients
-    G --> H[SQLiteClient<br/>Relational Data]
-    G --> I[LanceDBClient<br/>Vector Storage]
-    G --> J[TinkerGraphClient<br/>Graph Database]
+    G --> H[SQLiteClient<br/>Unified Storage + Vectors]
     
     %% Shared Services
     K[ConfigManager<br/>Configuration] --> A
@@ -291,8 +283,7 @@ graph TB
     O[@xenova/transformers] --> E
     O --> F
     P[better-sqlite3] --> H
-    Q[@lancedb/lancedb] --> I
-    R[gremlin] --> J
+    Q[sqlite-vec] --> H
     S[TypeScript Compiler] --> C
     T[glob] --> B
     
@@ -323,8 +314,7 @@ graph TD
     B --> H[Logging Config]
     
     E --> I[SQLite Path]
-    E --> J[LanceDB Path]
-    E --> K[TinkerGraph URL]
+    E --> J[Vector Extension Path]
     
     F --> L[Embedding Model]
     F --> M[Summary Model]
@@ -343,8 +333,7 @@ graph TD
     
     %% Usage by Modules
     I --> X[SQLiteClient]
-    J --> Y[LanceDBClient]
-    K --> Z[TinkerGraphClient]
+    J --> X[Vector Extension Loading]
     
     L --> AA[EmbeddingService]
     M --> BB[SummaryGenerator]

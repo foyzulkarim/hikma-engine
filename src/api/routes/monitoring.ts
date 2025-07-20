@@ -83,7 +83,7 @@ export function createMonitoringRouter(): Router {
       const health = await healthCheckService.performHealthCheck();
 
       // Check if critical services are available
-      const criticalChecks = ['searchService', 'lancedb', 'sqlite'];
+      const criticalChecks = ['searchService', 'sqlite'];
       const criticalFailures = criticalChecks.filter(
         (check) => health.checks[check]?.status === 'fail'
       );

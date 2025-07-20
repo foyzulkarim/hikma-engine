@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Hikma Engine Indexer Service (for processing source repositories)
   hikma-indexer:
@@ -9,10 +7,9 @@ services:
     container_name: hikma-indexer
     restart: "no"  # Run once and exit
     environment:
-      # Database Configuration (shared with API)
-      - HIKMA_LANCEDB_PATH=/app/data/lancedb
+      # Database Configuration
       - HIKMA_SQLITE_PATH=/app/data/metadata.db
-      - HIKMA_TINKERGRAPH_URL=ws://tinkergraph:8182/gremlin
+      - HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
       
       # Source Configuration
       - HIKMA_SOURCE_PATH=/app/source
@@ -20,8 +17,6 @@ services:
     volumes:
       - hikma-data:/app/data  # Shared data volume with API
       - ${SOURCE_REPO_PATH:-./sample-repo}:/app/source:ro
-    depends_on:
-      - tinkergraph
     networks:
       - hikma-network
     profiles:
@@ -45,9 +40,8 @@ services:
       - HIKMA_API_TIMEOUT=30000
       
       # Database Configuration
-      - HIKMA_LANCEDB_PATH=/app/data/lancedb
       - HIKMA_SQLITE_PATH=/app/data/metadata.db
-      - HIKMA_TINKERGRAPH_URL=ws://tinkergraph:8182/gremlin
+      - HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
       
       # Cache Configuration
       - HIKMA_API_CACHE_ENABLED=true
@@ -78,8 +72,6 @@ services:
       - hikma-logs:/app/logs
       # Mount source repository for indexing
       - ${SOURCE_REPO_PATH:-./sample-repo}:/app/source:ro  # Read-only mount
-    depends_on:
-      - tinkergraph
     networks:
       - hikma-network
     healthcheck:
@@ -90,26 +82,6 @@ services:
       start_period: 60s
 
 
-  # TinkerGraph (Gremlin Server)
-  tinkergraph:
-    image: tinkerpop/gremlin-server:3.6.4
-    container_name: hikma-tinkergraph
-    restart: unless-stopped
-    ports:
-      - "${GREMLIN_PORT:-8182}:8182"
-    environment:
-      - JAVA_OPTIONS=-Xms512m -Xmx1g
-    volumes:
-      - tinkergraph-data:/opt/gremlin-server/data
-      - ./config/gremlin-server.yaml:/opt/gremlin-server/conf/gremlin-server.yaml:ro
-    networks:
-      - hikma-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8182/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
   # Nginx Reverse Proxy (Optional)
   nginx:
@@ -177,9 +149,6 @@ volumes:
   hikma-data:
     driver: local
   hikma-logs:
-    driver: local
-
-  tinkergraph-data:
     driver: local
   nginx-logs:
     driver: local

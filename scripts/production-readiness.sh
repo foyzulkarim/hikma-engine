@@ -298,17 +298,7 @@ check_storage() {
     # Check database connectivity through health endpoint
     local health_response=$(curl -s "$API_URL/api/v1/monitoring/health")
     
-    # Check LanceDB
-    if echo "$health_response" | jq -e '.data.checks.lancedb.status == "pass"' > /dev/null; then
-        log_success "LanceDB connection is healthy"
-        PASSED_CHECKS=$((PASSED_CHECKS + 1))
-    else
-        log_error "LanceDB connection failed"
-        FAILED_CHECKS=$((FAILED_CHECKS + 1))
-    fi
-    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
-    
-    # Check SQLite
+    # Check SQLite with vector extension
     if echo "$health_response" | jq -e '.data.checks.sqlite.status == "pass"' > /dev/null; then
         log_success "SQLite connection is healthy"
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
@@ -318,15 +308,17 @@ check_storage() {
     fi
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
     
-    # Check TinkerGraph
-    if echo "$health_response" | jq -e '.data.checks.tinkergraph.status == "pass"' > /dev/null; then
-        log_success "TinkerGraph connection is healthy"
+    # Check vector extension availability
+    if echo "$health_response" | jq -e '.data.checks.sqlite.details.vectorEnabled == true' > /dev/null; then
+        log_success "SQLite vector extension is enabled"
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
     else
-        log_warning "TinkerGraph connection failed"
+        log_warning "SQLite vector extension is not available (semantic search may be limited)"
         WARNING_CHECKS=$((WARNING_CHECKS + 1))
     fi
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    
+
 }
 
 # Generate readiness report

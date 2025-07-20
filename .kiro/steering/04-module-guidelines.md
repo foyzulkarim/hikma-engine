@@ -56,6 +56,5 @@ inclusion: always
 
 - Implement polyglot persistence across multiple databases
 - Use LanceDB for vector embeddings and similarity search
-- Use SQLite for metadata and fast lookups
-- Use TinkerGraph for graph relationships
+- Use SQLite for metadata, fast lookups, and graph relationships
 - Ensure data consistency across storage systems

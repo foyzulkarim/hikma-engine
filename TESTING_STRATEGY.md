@@ -232,8 +232,7 @@ describe('AI Processing', () => {
 interface DataPersistenceResult {
   databases: {
     sqlite: boolean;      // Connection successful
-    lancedb: boolean;     // Connection successful  
-    tinkergraph: boolean; // Connection successful (or mock)
+    lancedb: boolean;     // Connection successful
   };
   dataIntegrity: {
     totalNodesStored: number;
@@ -341,13 +340,13 @@ describe('LanceDB Integration', () => {
 });
 ```
 
-### TinkerGraph Database Validation
+### SQLite Graph Database Validation
 
 **Expected Graph Structure:**
 ```typescript
-interface TinkerGraphValidation {
-  vertices: {
-    total: number;           // All nodes as vertices
+interface SQLiteGraphValidation {
+  nodes: {
+    total: number;           // All nodes in graph_nodes table
     byType: {
       FileNode: number;
       CodeNode: number;
@@ -370,9 +369,9 @@ interface TinkerGraphValidation {
 
 **Validation Test Cases:**
 ```typescript
-describe('TinkerGraph Integration', () => {
-  test('should create vertices for all nodes', async () => {
-    const vertexCount = await g.V().count().next();
+describe('SQLite Graph Integration', () => {
+  test('should create nodes for all entities', async () => {
+    const nodeCount = await sqliteClient.getEnhancedGraphStats();
     expect(vertexCount.value).toBe(expectedNodeCount);
   });
   
@@ -495,12 +494,10 @@ describe('hikma-engine Self-Processing', () => {
     });
   });
 
-  describe('TinkerGraph Database Validation', () => {
-    test('should create 298 vertices', async () => {
-      // Note: Currently mock implementation
-      // When real TinkerGraph is implemented:
-      const vertexCount = await g.V().count().next();
-      expect(vertexCount.value).toBe(298);
+  describe('SQLite Graph Database Validation', () => {
+    test('should create 298 nodes', async () => {
+      const stats = await sqliteClient.getEnhancedGraphStats();
+      expect(stats.nodeCount).toBe(298);
     });
 
     test('should create 338 edges', async () => {
@@ -835,7 +832,7 @@ npm start /Users/foyzul/personal/hikma-engine -- --skip-ai-summary --skip-embedd
 ✅ Duration: < 500ms
 ✅ SQLite records: 292 (files + directories + code_nodes + commits)
 ✅ LanceDB tables: 5 (one per node type)
-✅ TinkerGraph vertices: 298, edges: 338
+✅ SQLite graph: 298 nodes, 338 edges
 ```
 
 ### Scenario 2: Full AI Processing
@@ -950,9 +947,9 @@ export async function validateLanceDBData(dbPath: string) {
   return tableCounts;
 }
 
-// TinkerGraph inspection
-export async function validateTinkerGraphData(url: string) {
-  const g = getGraphTraversalSource(url);
+// SQLite Graph inspection
+export async function validateSQLiteGraphData(sqliteClient: SQLiteClient) {
+  const stats = await sqliteClient.getEnhancedGraphStats();
   return {
     vertices: await g.V().count().next(),
     edges: await g.E().count().next(),
