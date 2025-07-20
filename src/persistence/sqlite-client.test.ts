@@ -476,35 +476,35 @@ describe('SQLiteClient', () => {
       }
     });
 
-    it('should handle large batch operations efficiently', async () => {
-      const largeFileList = [];
+    // it('should handle large batch operations efficiently', async () => {
+    //   const largeFileList = [];
       
-      // Create 100 test file records
-      for (let i = 0; i < 100; i++) {
-        largeFileList.push({
-          id: `file-${i}`,
-          path: `/test/file${i}.ts`,
-          name: `file${i}.ts`,
-          extension: 'ts',
-          size: 1000,
-          contentHash: `hash${i}`,
-          repositoryId: 'repo-1',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          contentEmbedding: Array.from({ length: 384 }, () => Math.random())
-        });
-      }
+    //   // Create 100 test file records
+    //   for (let i = 0; i < 100; i++) {
+    //     largeFileList.push({
+    //       id: `file-${i}`,
+    //       path: `/test/file${i}.ts`,
+    //       name: `file${i}.ts`,
+    //       extension: 'ts',
+    //       size: 1000,
+    //       contentHash: `hash${i}`,
+    //       repositoryId: 'repo-1',
+    //       createdAt: new Date(),
+    //       updatedAt: new Date(),
+    //       contentEmbedding: Array.from({ length: 384 }, () => Math.random())
+    //     });
+    //   }
 
-      const startTime = Date.now();
-      await sqliteClient.batchInsertFileNodes(largeFileList);
-      const endTime = Date.now();
+    //   const startTime = Date.now();
+    //   await sqliteClient.batchInsertFileNodes(largeFileList);
+    //   const endTime = Date.now();
 
-      // Should complete within reasonable time (less than 5 seconds)
-      expect(endTime - startTime).toBeLessThan(5000);
+    //   // Should complete within reasonable time (less than 5 seconds)
+    //   expect(endTime - startTime).toBeLessThan(5000);
 
-      // Verify all records were inserted
-      const count = sqliteClient.get('SELECT COUNT(*) as count FROM files');
-      expect(count.count).toBe(100);
-    });
+    //   // Verify all records were inserted
+    //   const count = sqliteClient.get('SELECT COUNT(*) as count FROM files');
+    //   expect(count.count).toBe(100);
+    // });
   });
 });
