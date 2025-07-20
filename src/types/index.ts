@@ -12,7 +12,9 @@ export type NodeType =
   | 'DiscussionNode'
   | 'AnnotationNode'
   | 'TestNode'
-  | 'PullRequestNode';
+  | 'PullRequestNode'
+  | 'RepositoryNode'
+  | 'FunctionNode';
 
 export type EdgeType = 
   | 'CALLS'
@@ -65,7 +67,12 @@ export interface FileNode extends BaseNode {
     filePath: string;
     fileName: string;
     fileExtension: string;
-    aiSummary?: string; // AI-generated summary of the file content
+    repoId: string;
+    language: string;
+    sizeKb: number;
+    contentHash: string;
+    fileType: 'source' | 'test' | 'config' | 'dev' | 'vendor';
+    aiSummary?: string;
     imports?: string[];
     exports?: string[];
   };
@@ -79,6 +86,7 @@ export interface DirectoryNode extends BaseNode {
   properties: {
     dirPath: string;
     dirName: string;
+    repoId: string;
     aiSummary?: string; // AI-generated summary of the directory's purpose/content
   };
 }
@@ -154,6 +162,39 @@ export interface PullRequestNode extends BaseNode {
     url: string;
     body?: string;
   };
+}
+
+/**
+ * Represents a repository.
+ */
+export interface RepositoryNode extends BaseNode {
+  type: 'RepositoryNode';
+  properties: {
+    repoPath: string;
+    repoName: string;
+    createdAt: string;
+    lastUpdated: string;
+  };
+}
+
+export interface FunctionNode extends BaseNode {
+  type: 'FunctionNode';
+  properties: {
+     name: string;
+     signature: string;
+     returnType: string;
+     accessLevel: 'public' | 'private' | 'protected';
+     fileId: string;
+     filePath: string;
+     startLine: number;
+     endLine: number;
+     body: string;
+     calledByMethods: string[];
+     callsMethods: string[];
+     usesExternalMethods: boolean;
+     internalCallGraph: string[];
+     transitiveCallDepth: number;
+   };
 }
 
 /**

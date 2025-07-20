@@ -33,7 +33,7 @@
    HIKMA_LOG_LEVEL=debug
    HIKMA_ENABLE_CONSOLE_LOG=true
    HIKMA_SQLITE_PATH=./data/metadata.db
-   HIKMA_LANCEDB_PATH=./data/lancedb
+   HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
    ```
 
 ## Project Architecture
@@ -465,6 +465,258 @@ const config = {
 3. Create release tag
 4. Build and test release artifacts
 5. Deploy to production environment
+
+## Backup and Restore
+
+### Single Database Architecture
+
+With the unified SQLite architecture, all data (metadata, graph relationships, and vector embeddings) is stored in a single database file, making backup and restore operations simple and reliable.
+
+### Backup Procedures
+
+#### Manual Backup
+```bash
+# Simple file copy backup
+cp ./data/metadata.db ./backups/metadata-$(date +%Y%m%d-%H%M%S).db
+
+# Verify backup integrity
+sqlite3 ./backups/metadata-backup.db "PRAGMA integrity_check;"
+```
+
+#### Automated Backup Script
+```bash
+#!/bin/bash
+# backup-database.sh
+
+BACKUP_DIR="./backups"
+DB_PATH="./data/metadata.db"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+BACKUP_FILE="${BACKUP_DIR}/metadata-${TIMESTAMP}.db"
+
+# Create backup directory if it doesn't exist
+mkdir -p "$BACKUP_DIR"
+
+# Create backup
+cp "$DB_PATH" "$BACKUP_FILE"
+
+# Verify backup
+if sqlite3 "$BACKUP_FILE" "PRAGMA integrity_check;" | grep -q "ok"; then
+    echo "Backup created successfully: $BACKUP_FILE"
+    
+    # Optional: Compress backup
+    gzip "$BACKUP_FILE"
+    echo "Backup compressed: ${BACKUP_FILE}.gz"
+else
+    echo "Backup verification failed"
+    rm "$BACKUP_FILE"
+    exit 1
+fi
+
+# Optional: Clean up old backups (keep last 7 days)
+find "$BACKUP_DIR" -name "metadata-*.db.gz" -mtime +7 -delete
+```
+
+#### Production Backup with SQLite Backup API
+```typescript
+// backup-service.ts
+import Database from 'better-sqlite3';
+
+export class BackupService {
+  async createBackup(sourcePath: string, backupPath: string): Promise<void> {
+    const source = new Database(sourcePath, { readonly: true });
+    const backup = source.backup(backupPath);
+    
+    return new Promise((resolve, reject) => {
+      backup.on('progress', ({ totalPages, remainingPages }) => {
+        console.log(`Backup progress: ${totalPages - remainingPages}/${totalPages} pages`);
+      });
+      
+      backup.on('done', () => {
+        console.log('Backup completed successfully');
+        source.close();
+        resolve();
+      });
+      
+      backup.on('error', (error) => {
+        console.error('Backup failed:', error);
+        source.close();
+        reject(error);
+      });
+    });
+  }
+}
+```
+
+### Restore Procedures
+
+#### Simple Restore
+```bash
+# Stop the application first
+# Then restore from backup
+cp ./backups/metadata-20240120-143000.db ./data/metadata.db
+
+# Verify restored database
+sqlite3 ./data/metadata.db "PRAGMA integrity_check;"
+
+# Restart the application
+```
+
+#### Restore with Verification
+```bash
+#!/bin/bash
+# restore-database.sh
+
+BACKUP_FILE="$1"
+DB_PATH="./data/metadata.db"
+DB_BACKUP="${DB_PATH}.backup-$(date +%Y%m%d-%H%M%S)"
+
+if [ -z "$BACKUP_FILE" ]; then
+    echo "Usage: $0 <backup-file>"
+    exit 1
+fi
+
+# Verify backup file exists and is valid
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "Backup file not found: $BACKUP_FILE"
+    exit 1
+fi
+
+# Decompress if needed
+if [[ "$BACKUP_FILE" == *.gz ]]; then
+    echo "Decompressing backup..."
+    gunzip -c "$BACKUP_FILE" > /tmp/restore.db
+    BACKUP_FILE="/tmp/restore.db"
+fi
+
+# Verify backup integrity
+if ! sqlite3 "$BACKUP_FILE" "PRAGMA integrity_check;" | grep -q "ok"; then
+    echo "Backup file is corrupted"
+    exit 1
+fi
+
+# Create backup of current database
+if [ -f "$DB_PATH" ]; then
+    echo "Creating backup of current database..."
+    cp "$DB_PATH" "$DB_BACKUP"
+fi
+
+# Restore from backup
+echo "Restoring database from backup..."
+cp "$BACKUP_FILE" "$DB_PATH"
+
+# Verify restored database
+if sqlite3 "$DB_PATH" "PRAGMA integrity_check;" | grep -q "ok"; then
+    echo "Database restored successfully"
+    
+    # Clean up temporary files
+    [ -f "/tmp/restore.db" ] && rm "/tmp/restore.db"
+    
+    echo "Previous database backed up to: $DB_BACKUP"
+else
+    echo "Restored database is corrupted, rolling back..."
+    cp "$DB_BACKUP" "$DB_PATH"
+    exit 1
+fi
+```
+
+### Docker Backup and Restore
+
+#### Backup from Docker Container
+```bash
+# Create backup from running container
+docker exec hikma-api cp /app/data/metadata.db /app/data/backup.db
+docker cp hikma-api:/app/data/backup.db ./backups/metadata-$(date +%Y%m%d).db
+
+# Or use volume backup
+docker run --rm -v hikma_data:/data -v $(pwd)/backups:/backup alpine \
+  cp /data/metadata.db /backup/metadata-$(date +%Y%m%d).db
+```
+
+#### Restore to Docker Container
+```bash
+# Stop container
+docker-compose down
+
+# Restore backup to volume
+docker run --rm -v hikma_data:/data -v $(pwd)/backups:/backup alpine \
+  cp /backup/metadata-20240120.db /data/metadata.db
+
+# Start container
+docker-compose up -d
+```
+
+### Kubernetes Backup and Restore
+
+#### Backup from Kubernetes Pod
+```bash
+# Create backup
+kubectl exec -n hikma-engine deployment/hikma-api -- \
+  cp /app/data/metadata.db /app/data/backup.db
+
+# Copy backup to local machine
+kubectl cp hikma-engine/hikma-api-pod:/app/data/backup.db \
+  ./backups/metadata-$(date +%Y%m%d).db
+```
+
+#### Restore to Kubernetes
+```bash
+# Copy backup to pod
+kubectl cp ./backups/metadata-20240120.db \
+  hikma-engine/hikma-api-pod:/app/data/metadata.db
+
+# Restart deployment to pick up restored database
+kubectl rollout restart deployment/hikma-api -n hikma-engine
+```
+
+### Backup Best Practices
+
+1. **Regular Automated Backups**: Set up cron jobs or scheduled tasks
+2. **Multiple Backup Locations**: Store backups in different locations (local, cloud, etc.)
+3. **Backup Verification**: Always verify backup integrity after creation
+4. **Retention Policy**: Implement backup rotation to manage storage space
+5. **Test Restores**: Regularly test restore procedures
+6. **Monitor Backup Size**: Track backup size growth over time
+
+### Disaster Recovery
+
+#### Complete System Recovery
+```bash
+# 1. Set up new environment
+git clone <repository>
+cd hikma-engine
+npm install
+
+# 2. Restore database
+cp ./backups/latest-backup.db ./data/metadata.db
+
+# 3. Verify database integrity
+sqlite3 ./data/metadata.db "PRAGMA integrity_check;"
+
+# 4. Start application
+npm start
+```
+
+#### Point-in-Time Recovery
+Since SQLite doesn't have built-in point-in-time recovery, implement application-level logging:
+
+```typescript
+// audit-log.ts
+export class AuditLogger {
+  async logOperation(operation: string, data: any): Promise<void> {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      operation,
+      data: JSON.stringify(data)
+    };
+    
+    // Log to separate audit database or file
+    await this.auditDb.run(
+      'INSERT INTO audit_log (timestamp, operation, data) VALUES (?, ?, ?)',
+      [logEntry.timestamp, logEntry.operation, logEntry.data]
+    );
+  }
+}
+```
 
 ## Troubleshooting
 

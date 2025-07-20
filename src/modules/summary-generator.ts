@@ -9,8 +9,12 @@ import * as path from 'path';
 import { FileNode, DirectoryNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
-import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
-// import { pipeline, env } from '@xenova/transformers'; // Example LLM integration
+import {
+  getErrorMessage,
+  getErrorStack,
+  logError,
+} from '../utils/error-handling';
+import { pipeline, env } from '@xenova/transformers';
 
 /**
  * Generates AI summaries for FileNodes and DirectoryNodes.
@@ -28,8 +32,8 @@ export class SummaryGenerator {
   constructor(config: ConfigManager) {
     this.config = config;
     this.logger.info('Initializing SummaryGenerator');
-    // TODO: Initialize LLM (e.g., load model or configure API client)
-    // env.allowLocalModels = false; // Example for @xenova/transformers
+    // Set environment for transformers
+    env.allowLocalModels = true;
   }
 
   /**
@@ -42,29 +46,24 @@ export class SummaryGenerator {
     }
 
     const operation = this.logger.operation('Loading LLM for summarization');
-    
+
     try {
       const aiConfig = this.config.getAIConfig();
-      this.logger.info('Loading LLM for summarization', { 
-        model: aiConfig.summary.model,
-        maxTokens: aiConfig.summary.maxTokens 
-      });
-      
-      // TODO: Implement actual LLM loading
-      // Example for @xenova/transformers:
-      // this.llm = await pipeline('summarization', aiConfig.summary.model);
-      
-      // Mock implementation for now
-      this.llm = {
+      this.logger.info('Loading LLM for summarization', {
         model: aiConfig.summary.model,
         maxTokens: aiConfig.summary.maxTokens,
-      };
-      
+      });
+
+      // Load the transformers pipeline for summarization
+      this.llm = await pipeline('summarization', aiConfig.summary.model);
+
       this.isModelLoaded = true;
       this.logger.info('LLM loaded successfully');
       operation();
     } catch (error) {
-      this.logger.error('Failed to load LLM', { error: getErrorMessage(error) });
+      this.logger.error('Failed to load LLM', {
+        error: getErrorMessage(error),
+      });
       operation();
       throw error;
     }
@@ -76,33 +75,55 @@ export class SummaryGenerator {
    * @param {number} maxLength - Maximum length of the summary.
    * @returns {Promise<string>} A promise that resolves to the AI-generated summary.
    */
-  private async generateSummary(text: string, maxLength: number = 150): Promise<string> {
+  private async generateSummary(
+    text: string,
+    maxLength: number = 150,
+    filePath: string = ''
+  ): Promise<string> {
     if (!this.isModelLoaded) {
       await this.loadModel();
     }
 
     try {
-      this.logger.debug('Generating summary', { 
+      this.logger.info('Generating summary', {
         textLength: text.length,
-        maxLength 
+        maxLength,
+        filePath,
       });
 
-      // TODO: Implement actual summary generation using the loaded LLM.
-      // Example for @xenova/transformers:
-      // const result = await this.llm(text, { max_length: maxLength });
-      // return result[0].summary_text;
+      // Truncate very long texts to avoid model input limits (most models have ~512-1024 token limits)
+      // Approximate 1 token = 4 characters, so we limit to ~2000 characters to be safe
+      const maxInputLength = 2000;
+      const inputText =
+        text.length > maxInputLength
+          ? text.substring(0, maxInputLength) + '...'
+          : text;
 
-      // Mock implementation for now
+      // Use transformers pipeline to generate summary
+      const result = await this.llm(inputText, {
+        max_length: maxLength,
+        min_length: Math.min(30, Math.floor(maxLength * 0.2)),
+      });
+
+      const summary_text = result[0].summary_text;
+      this.logger.info('Summary generated', {
+        summary_text,
+        filePath,
+      });
+      return summary_text;
+    } catch (error) {
+      this.logger.warn('Failed to generate summary, using fallback', {
+        error: getErrorMessage(error),
+      });
+      // Fallback to basic text analysis
       const truncatedText = text.substring(0, 200);
-      const summary = `AI Summary: This content appears to contain ${this.analyzeContent(text)}. ${truncatedText}...`;
-      
-      return summary.length > maxLength 
+      const summary = `AI Summary: This content appears to contain ${this.analyzeContent(
+        text
+      )}. ${truncatedText}...`;
+
+      return summary.length > maxLength
         ? summary.substring(0, maxLength - 3) + '...'
         : summary;
-        
-    } catch (error) {
-      this.logger.warn('Failed to generate summary, using fallback', { error: getErrorMessage(error) });
-      return `Summary unavailable: ${text.substring(0, 100)}...`;
     }
   }
 
@@ -113,28 +134,36 @@ export class SummaryGenerator {
    */
   private analyzeContent(content: string): string {
     const insights: string[] = [];
-    
+
     // Basic code analysis
-    if (content.includes('function ') || content.includes('const ') || content.includes('class ')) {
+    if (
+      content.includes('function ') ||
+      content.includes('const ') ||
+      content.includes('class ')
+    ) {
       insights.push('code definitions');
     }
-    
+
     if (content.includes('import ') || content.includes('require(')) {
       insights.push('module imports');
     }
-    
-    if (content.includes('test(') || content.includes('describe(') || content.includes('it(')) {
+
+    if (
+      content.includes('test(') ||
+      content.includes('describe(') ||
+      content.includes('it(')
+    ) {
       insights.push('test cases');
     }
-    
+
     if (content.includes('TODO') || content.includes('FIXME')) {
       insights.push('development notes');
     }
-    
+
     if (content.includes('/**') || content.includes('//')) {
       insights.push('documentation');
     }
-    
+
     return insights.length > 0 ? insights.join(', ') : 'various content types';
   }
 
@@ -148,7 +177,9 @@ export class SummaryGenerator {
       const content = await fs.promises.readFile(filePath, 'utf-8');
       return content;
     } catch (error) {
-      this.logger.warn(`Failed to read file: ${filePath}`, { error: getErrorMessage(error) });
+      this.logger.warn(`Failed to read file: ${filePath}`, {
+        error: getErrorMessage(error),
+      });
       return `Unable to read file content: ${path.basename(filePath)}`;
     }
   }
@@ -160,35 +191,58 @@ export class SummaryGenerator {
    */
   private async gatherDirectoryInfo(dirPath: string): Promise<string> {
     try {
-      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-      const files = entries.filter(entry => entry.isFile()).map(entry => entry.name);
-      const dirs = entries.filter(entry => entry.isDirectory()).map(entry => entry.name);
-      
-      const fileTypes = new Set(files.map(file => path.extname(file).toLowerCase()));
-      const fileTypesList = Array.from(fileTypes).filter(ext => ext !== '').join(', ');
-      
+      const entries = await fs.promises.readdir(dirPath, {
+        withFileTypes: true,
+      });
+      const files = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name);
+      const dirs = entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+
+      const fileTypes = new Set(
+        files.map((file) => path.extname(file).toLowerCase())
+      );
+      const fileTypesList = Array.from(fileTypes)
+        .filter((ext) => ext !== '')
+        .join(', ');
+
       let info = `Directory containing ${files.length} files and ${dirs.length} subdirectories.`;
-      
+
       if (fileTypesList) {
         info += ` File types: ${fileTypesList}.`;
       }
-      
+
       if (dirs.length > 0) {
-        info += ` Subdirectories: ${dirs.slice(0, 5).join(', ')}${dirs.length > 5 ? '...' : ''}.`;
+        info += ` Subdirectories: ${dirs.slice(0, 5).join(', ')}${
+          dirs.length > 5 ? '...' : ''
+        }.`;
       }
-      
+
       // Check for common patterns
-      const hasTests = files.some(file => file.includes('test') || file.includes('spec'));
-      const hasConfig = files.some(file => file.includes('config') || file.includes('.json') || file.includes('.yml'));
-      const hasReadme = files.some(file => file.toLowerCase().includes('readme'));
-      
+      const hasTests = files.some(
+        (file) => file.includes('test') || file.includes('spec')
+      );
+      const hasConfig = files.some(
+        (file) =>
+          file.includes('config') ||
+          file.includes('.json') ||
+          file.includes('.yml')
+      );
+      const hasReadme = files.some((file) =>
+        file.toLowerCase().includes('readme')
+      );
+
       if (hasTests) info += ' Contains test files.';
       if (hasConfig) info += ' Contains configuration files.';
       if (hasReadme) info += ' Contains documentation.';
-      
+
       return info;
     } catch (error) {
-      this.logger.warn(`Failed to gather directory info: ${dirPath}`, { error: getErrorMessage(error) });
+      this.logger.warn(`Failed to gather directory info: ${dirPath}`, {
+        error: getErrorMessage(error),
+      });
       return `Directory information unavailable: ${path.basename(dirPath)}`;
     }
   }
@@ -199,27 +253,38 @@ export class SummaryGenerator {
    * @returns {Promise<FileNode[]>} A promise that resolves to the updated FileNodes with summaries.
    */
   async summarizeFileNodes(fileNodes: FileNode[]): Promise<FileNode[]> {
-    const operation = this.logger.operation(`Summarizing ${fileNodes.length} FileNodes`);
-    
+    const operation = this.logger.operation(
+      `Summarizing ${fileNodes.length} FileNodes`
+    );
+
     try {
-      this.logger.info(`Starting file summarization for ${fileNodes.length} files`);
-      
+      this.logger.info(
+        `Starting file summarization for ${fileNodes.length} files`
+      );
+
       const aiConfig = this.config.getAIConfig();
       const summarizedNodes: FileNode[] = [];
-      
+
       for (const node of fileNodes) {
         try {
           // Construct full file path
-          const fullPath = path.isAbsolute(node.properties.filePath) 
-            ? node.properties.filePath 
+          const fullPath = path.isAbsolute(node.properties.filePath)
+            ? node.properties.filePath
             : path.resolve(process.cwd(), node.properties.filePath);
-          
+
           // Read file content
           const fileContent = await this.readFileContent(fullPath);
-          
+          this.logger.info('File content read', {
+            fullPath,
+            fileContent: fileContent.substring(0, 100),
+          });
           // Generate summary
-          const summary = await this.generateSummary(fileContent, aiConfig.summary.maxTokens);
-          
+          const summary = await this.generateSummary(
+            fileContent,
+            aiConfig.summary.maxTokens,
+            fullPath
+          );
+
           // Update node with summary
           const updatedNode: FileNode = {
             ...node,
@@ -228,12 +293,16 @@ export class SummaryGenerator {
               aiSummary: summary,
             },
           };
-          
+
           summarizedNodes.push(updatedNode);
-          this.logger.debug(`Generated summary for file: ${node.properties.fileName}`);
-          
+          this.logger.debug(
+            `Generated summary for file: ${node.properties.fileName}`
+          );
         } catch (error) {
-          this.logger.warn(`Failed to summarize file: ${node.properties.fileName}`, { error: getErrorMessage(error) });
+          this.logger.warn(
+            `Failed to summarize file: ${node.properties.fileName}`,
+            { error: getErrorMessage(error) }
+          );
           // Add node without summary
           summarizedNodes.push({
             ...node,
@@ -244,17 +313,21 @@ export class SummaryGenerator {
           });
         }
       }
-      
+
       this.logger.info(`File summarization completed`, {
         total: fileNodes.length,
-        successful: summarizedNodes.filter(n => !n.properties.aiSummary?.startsWith('Summary generation failed')).length,
+        successful: summarizedNodes.filter(
+          (n) =>
+            !n.properties.aiSummary?.startsWith('Summary generation failed')
+        ).length,
       });
-      
+
       operation();
       return summarizedNodes;
-      
     } catch (error) {
-      this.logger.error('File summarization failed', { error: getErrorMessage(error) });
+      this.logger.error('File summarization failed', {
+        error: getErrorMessage(error),
+      });
       operation();
       throw error;
     }
@@ -265,28 +338,37 @@ export class SummaryGenerator {
    * @param {DirectoryNode[]} directoryNodes - An array of DirectoryNodes to summarize.
    * @returns {Promise<DirectoryNode[]>} A promise that resolves to the updated DirectoryNodes with summaries.
    */
-  async summarizeDirectoryNodes(directoryNodes: DirectoryNode[]): Promise<DirectoryNode[]> {
-    const operation = this.logger.operation(`Summarizing ${directoryNodes.length} DirectoryNodes`);
-    
+  async summarizeDirectoryNodes(
+    directoryNodes: DirectoryNode[]
+  ): Promise<DirectoryNode[]> {
+    const operation = this.logger.operation(
+      `Summarizing ${directoryNodes.length} DirectoryNodes`
+    );
+
     try {
-      this.logger.info(`Starting directory summarization for ${directoryNodes.length} directories`);
-      
+      this.logger.info(
+        `Starting directory summarization for ${directoryNodes.length} directories`
+      );
+
       const aiConfig = this.config.getAIConfig();
       const summarizedNodes: DirectoryNode[] = [];
-      
+
       for (const node of directoryNodes) {
         try {
           // Construct full directory path
-          const fullPath = path.isAbsolute(node.properties.dirPath) 
-            ? node.properties.dirPath 
+          const fullPath = path.isAbsolute(node.properties.dirPath)
+            ? node.properties.dirPath
             : path.resolve(process.cwd(), node.properties.dirPath);
-          
+
           // Gather directory information
           const dirInfo = await this.gatherDirectoryInfo(fullPath);
-          
+
           // Generate summary
-          const summary = await this.generateSummary(dirInfo, aiConfig.summary.maxTokens);
-          
+          const summary = await this.generateSummary(
+            dirInfo,
+            aiConfig.summary.maxTokens
+          );
+
           // Update node with summary
           const updatedNode: DirectoryNode = {
             ...node,
@@ -295,12 +377,16 @@ export class SummaryGenerator {
               aiSummary: summary,
             },
           };
-          
+
           summarizedNodes.push(updatedNode);
-          this.logger.debug(`Generated summary for directory: ${node.properties.dirName}`);
-          
+          this.logger.debug(
+            `Generated summary for directory: ${node.properties.dirName}`
+          );
         } catch (error) {
-          this.logger.warn(`Failed to summarize directory: ${node.properties.dirName}`, { error: getErrorMessage(error) });
+          this.logger.warn(
+            `Failed to summarize directory: ${node.properties.dirName}`,
+            { error: getErrorMessage(error) }
+          );
           // Add node without summary
           summarizedNodes.push({
             ...node,
@@ -311,17 +397,21 @@ export class SummaryGenerator {
           });
         }
       }
-      
+
       this.logger.info(`Directory summarization completed`, {
         total: directoryNodes.length,
-        successful: summarizedNodes.filter(n => !n.properties.aiSummary?.startsWith('Summary generation failed')).length,
+        successful: summarizedNodes.filter(
+          (n) =>
+            !n.properties.aiSummary?.startsWith('Summary generation failed')
+        ).length,
       });
-      
+
       operation();
       return summarizedNodes;
-      
     } catch (error) {
-      this.logger.error('Directory summarization failed', { error: getErrorMessage(error) });
+      this.logger.error('Directory summarization failed', {
+        error: getErrorMessage(error),
+      });
       operation();
       throw error;
     }
@@ -336,12 +426,10 @@ export class SummaryGenerator {
     model: string;
   }> {
     const aiConfig = this.config.getAIConfig();
-    
+
     return {
       modelLoaded: this.isModelLoaded,
       model: aiConfig.summary.model,
     };
   }
 }
-
-

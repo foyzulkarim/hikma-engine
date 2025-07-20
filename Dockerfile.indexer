@@ -1,0 +1,72 @@
+# Dockerfile for Hikma Engine Indexer
+FROM node:18-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY src/ ./src/
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM node:18-alpine AS production
+
+# Install dumb-init and dependencies for sqlite-vec extension
+RUN apk add --no-cache dumb-init git curl
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S hikma -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+
+# Create directories
+RUN mkdir -p /app/data /app/source /app/extensions && \
+    chown -R hikma:nodejs /app
+
+# Download sqlite-vec extension for Alpine Linux (x86_64)
+# Using a specific version to ensure reproducible builds
+RUN curl -L -o /tmp/sqlite-vec.tar.gz \
+    "https://github.com/asg017/sqlite-vec/releases/download/v0.1.0-alpha.1/sqlite-vec-0.1.0-alpha.1-linux-x86_64-extension.tar.gz" && \
+    cd /tmp && \
+    tar -xzf sqlite-vec.tar.gz && \
+    mv vec0.so /app/extensions/ && \
+    rm -f /tmp/sqlite-vec.tar.gz && \
+    chown -R hikma:nodejs /app/extensions
+
+# Switch to non-root user
+USER hikma
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV HIKMA_SOURCE_PATH=/app/source
+ENV HIKMA_SQLITE_PATH=/app/data/metadata.db
+ENV HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Default command - run the indexer
+CMD ["node", "dist/index.js"]
+
+# Labels for metadata
+LABEL maintainer="Hikma Engine Team <support@hikma-engine.com>"
+LABEL version="1.0.0"
+LABEL description="Hikma Engine Repository Indexer"

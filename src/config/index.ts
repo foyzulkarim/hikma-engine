@@ -6,14 +6,9 @@
 import * as path from 'path';
 
 export interface DatabaseConfig {
-  lancedb: {
-    path: string;
-  };
   sqlite: {
     path: string;
-  };
-  tinkergraph: {
-    url: string;
+    vectorExtension?: string;
   };
 }
 
@@ -52,14 +47,9 @@ export interface AppConfig {
  */
 const defaultConfig: AppConfig = {
   database: {
-    lancedb: {
-      path: './data/lancedb',
-    },
     sqlite: {
       path: './data/metadata.db',
-    },
-    tinkergraph: {
-      url: 'ws://localhost:8182/gremlin',
+      vectorExtension: './extensions/vec0.dylib',
     },
   },
   ai: {
@@ -124,18 +114,17 @@ export class ConfigManager {
     let config = { ...defaultConfig };
 
     // Resolve relative paths to absolute paths based on project root
-    config.database.lancedb.path = path.resolve(this.projectRoot, config.database.lancedb.path);
     config.database.sqlite.path = path.resolve(this.projectRoot, config.database.sqlite.path);
+    if (config.database.sqlite.vectorExtension) {
+      config.database.sqlite.vectorExtension = path.resolve(this.projectRoot, config.database.sqlite.vectorExtension);
+    }
 
     // Override with environment variables if present
-    if (process.env.HIKMA_LANCEDB_PATH) {
-      config.database.lancedb.path = path.resolve(this.projectRoot, process.env.HIKMA_LANCEDB_PATH);
-    }
     if (process.env.HIKMA_SQLITE_PATH) {
       config.database.sqlite.path = path.resolve(this.projectRoot, process.env.HIKMA_SQLITE_PATH);
     }
-    if (process.env.HIKMA_TINKERGRAPH_URL) {
-      config.database.tinkergraph.url = process.env.HIKMA_TINKERGRAPH_URL;
+    if (process.env.HIKMA_SQLITE_VEC_EXTENSION) {
+      config.database.sqlite.vectorExtension = path.resolve(this.projectRoot, process.env.HIKMA_SQLITE_VEC_EXTENSION);
     }
     if (process.env.HIKMA_LOG_LEVEL) {
       config.logging.level = process.env.HIKMA_LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error';

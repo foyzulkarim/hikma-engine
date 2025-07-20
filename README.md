@@ -9,7 +9,7 @@ A sophisticated TypeScript-based code knowledge graph indexer that transforms Gi
 - **Git Integration**: Complete commit history analysis and file evolution tracking
 - **AI-Enhanced**: LLM-powered summaries for files and directories
 - **Vector Embeddings**: Semantic similarity search using transformer models
-- **Polyglot Persistence**: LanceDB (vector), TinkerGraph (graph), SQLite (relational)
+- **Unified Persistence**: SQLite with vector extension for all data types
 - **Incremental Indexing**: Process only changes since last run
 - **Test Analysis**: Automatic test detection and coverage mapping
 - **Configurable**: Environment-based configuration with sensible defaults
@@ -118,9 +118,9 @@ hikma-engine processes repositories through a 7-phase pipeline:
 
 ### Storage Strategy
 
-- **LanceDB**: Vector embeddings for semantic search
-- **TinkerGraph**: Graph relationships for traversal queries
-- **SQLite**: Metadata and fast lookups
+- **SQLite with Vector Extension**: Unified storage for metadata, graph relationships, and vector embeddings
+- **sqlite-vec**: Enables efficient semantic similarity search within SQLite
+- **Single Database**: Simplified architecture with ACID transactions and unified queries
 
 ## ⚙️ Configuration
 
@@ -128,9 +128,8 @@ hikma-engine processes repositories through a 7-phase pipeline:
 
 ```bash
 # Database paths
-HIKMA_LANCEDB_PATH=./data/lancedb
 HIKMA_SQLITE_PATH=./data/metadata.db
-HIKMA_TINKERGRAPH_URL=ws://localhost:8182/gremlin
+HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
 
 # Logging
 HIKMA_LOG_LEVEL=info  # debug, info, warn, error
@@ -282,7 +281,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Built with TypeScript and Node.js
 - Uses Xenova/transformers for AI capabilities
 - Leverages simple-git for Git analysis
-- Powered by better-sqlite3, LanceDB, and Gremlin
+- Powered by better-sqlite3 and sqlite-vec extension
 
 ## 📞 Support
 
