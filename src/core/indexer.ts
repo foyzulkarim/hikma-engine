@@ -109,10 +109,18 @@ export class Indexer {
       //console.log('fileNodes', fileNodes.filter(node => node.type === 'FileNode'));
 
       // Phase 3: AI Summary Generation (optional)
-      // const nodesWithSummaries = options.skipAISummary
-      //   ? astNodes
-      //   : await this.generateAISummaries(astNodes);
-      const nodesWithSummaries = astNodes;
+      const nodesToSummarize = [
+        ...fileNodes.filter(n => n.type === 'FileNode'),
+        ...astNodes.filter(n => n.type === 'DirectoryNode'),
+      ];
+      const nodesWithSummaries = options.skipAISummary
+        ? [...fileNodes, ...astNodes]
+        : await this.generateAISummaries(nodesToSummarize);
+      
+      // Update the original arrays with summarized versions
+      const updatedFileNodes = nodesWithSummaries.filter(n => n.type === 'FileNode') as FileNode[];
+      const updatedAstNodes = nodesWithSummaries.filter(n => n.type !== 'FileNode');
+      
       this.logger.info('AI summary generation completed');
 
       // temp: print the nodes with summaries
@@ -139,8 +147,8 @@ export class Indexer {
       // Phase 5: Combine all nodes and edges
       const allNodes = [
         repoNode,
-        ...fileNodes,
-        ...nodesWithSummaries,
+        ...updatedFileNodes,
+        ...updatedAstNodes,
         ...gitNodes,
       ];
       const allEdges = [...astEdges, ...gitEdges];
