@@ -9,7 +9,7 @@ import * as path from 'path';
 import { CommitNode, PullRequestNode, Edge, FileNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
-import { SQLiteClient } from '../persistence/db-clients';
+import { SQLiteClient } from '../persistence/db/connection';
 import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
 
 /**

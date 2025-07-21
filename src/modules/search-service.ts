@@ -159,7 +159,7 @@ export class SearchService {
       // Search in SQLite using vector similarity for each node type
       const allResults: SearchResult[] = [];
       const nodeTypesToSearch = nodeTypes || [
-        'Code', 'File', 'Directory', 'Commit', 'Test', 'PullRequest', 'Function'
+        'Code', 'File', 'Commit', 'Test', 'PullRequest'
       ];
 
       for (const nodeType of nodeTypesToSearch) {
@@ -222,10 +222,7 @@ export class SearchService {
           results.push(...commitResults.map(r => this.convertToSearchResult(r, 'Commit')));
           break;
           
-        case 'Directory':
-          const dirResults = await this.sqliteClient.vectorSearch('directories', 'summary_embedding', queryEmbedding, limit, minSimilarity);
-          results.push(...dirResults.map(r => this.convertToSearchResult(r, 'Directory')));
-          break;
+
           
         case 'Code':
           const codeResults = await this.sqliteClient.vectorSearch('code_nodes', 'code_embedding', queryEmbedding, limit, minSimilarity);
@@ -695,7 +692,7 @@ export class SearchService {
       }
       
       const { limit = 20, minSimilarity = 0.5, metadataFilters = {} } = options;
-      const allNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'DirectoryNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
+      const allNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
       
       const allResults: SearchResult[] = [];
       

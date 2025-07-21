@@ -86,11 +86,17 @@ export class SearchController {
         includeMetadata: includeMetadata === 'true',
       };
 
-      // Parse node types if provided
-      if (nodeTypes && typeof nodeTypes === 'string') {
-        const validNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'DirectoryNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
-        const requestedTypes = nodeTypes.split(',').map(t => t.trim()) as NodeType[];
-        searchOptions.nodeTypes = requestedTypes.filter(t => validNodeTypes.includes(t));
+      // Parse and validate nodeTypes if provided
+      let parsedNodeTypes: NodeType[] | undefined;
+      if (nodeTypes) {
+        const validNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
+        const nodeTypesArray = Array.isArray(nodeTypes) ? nodeTypes : [nodeTypes];
+        const nodeTypesStrings = nodeTypesArray.map(nt => String(nt));
+        const invalidTypes = nodeTypesStrings.filter(type => !validNodeTypes.includes(type as NodeType));
+        if (invalidTypes.length > 0) {
+          throw ValidationError.invalid('nodeTypes', nodeTypes, `Invalid node types: ${invalidTypes.join(', ')}. Valid types: ${validNodeTypes.join(', ')}`, req.context?.requestId);
+        }
+        parsedNodeTypes = nodeTypesStrings as NodeType[];
       }
 
       // Check cache first
@@ -681,10 +687,10 @@ export class SearchController {
 
       const searchLimit = Math.min(parseInt(limit as string, 10) || 20, 100);
 
-      // Parse include types if provided
+      // Validate nodeTypes if provided
       let nodeTypes: NodeType[] | undefined;
       if (includeTypes && typeof includeTypes === 'string') {
-        const validNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'DirectoryNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
+        const validNodeTypes: NodeType[] = ['CodeNode', 'FileNode', 'CommitNode', 'TestNode', 'PullRequestNode'];
         const requestedTypes = includeTypes.split(',').map(t => t.trim()) as NodeType[];
         nodeTypes = requestedTypes.filter(t => validNodeTypes.includes(t));
       }

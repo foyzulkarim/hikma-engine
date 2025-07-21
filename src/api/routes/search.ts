@@ -130,11 +130,10 @@ export function createSearchRouter(config: ConfigManager): Router {
         },
         supportedNodeTypes: [
           'CodeNode',
-          'FileNode', 
-          'DirectoryNode',
+          'FileNode',
           'CommitNode',
           'TestNode',
-          'PullRequestNode'
+          'PullRequestNode',
         ],
       },
       meta: {

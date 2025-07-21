@@ -411,12 +411,12 @@ export class ResultEnhancerService {
 
     // Node type relevance
     const nodeTypeWeights: Record<string, number> = {
-      'CodeNode': 0.1,
-      'FileNode': 0.08,
-      'CommitNode': 0.06,
-      'TestNode': 0.09,
-      'PullRequestNode': 0.05,
-      'DirectoryNode': 0.04,
+      'CodeNode': 0.9,
+      'FileNode': 0.8,
+      'CommitNode': 0.6,
+      'TestNode': 0.7,
+      'PullRequestNode': 0.5,
+      'FunctionNode': 0.85,
     };
 
     const nodeTypeWeight = nodeTypeWeights[result.node.type] || 0.05;
