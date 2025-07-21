@@ -107,8 +107,7 @@ export interface SearchFacets {
   languages: Array<{ name: string; count: number }>;
   authors: Array<{ name: string; count: number }>;
   fileTypes: Array<{ name: string; count: number }>;
-  directories: Array<{ name: string; count: number }>;
-  dateRanges: Array<{ name: string; count: number; from?: string; to?: string }>;
+  frameworks: Array<{ name: string; count: number }>;
 }
 
 /**

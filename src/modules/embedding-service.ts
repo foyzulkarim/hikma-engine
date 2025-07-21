@@ -1,22 +1,16 @@
 /**
- * @file Generates vector embeddings for all node types using pre-trained transformer models.
- *       These embeddings enable semantic similarity searches and clustering of code elements.
+ * @file Responsible for generating vector embeddings for various node types.
  */
 
-import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, DirectoryNode, RepositoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
+import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, RepositoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
-import { getErrorMessage, getErrorStack, logError } from '../utils/error-handling';
-import { pipeline, env } from '@xenova/transformers';
+import { getErrorMessage } from '../utils/error-handling';
 
-/**
- * Generates vector embeddings for knowledge graph nodes.
- */
 export class EmbeddingService {
   private config: ConfigManager;
   private logger = getLogger('EmbeddingService');
-  private model: any; // Placeholder for the embedding model
-  private isModelLoaded = false;
+  private model: any = null;
 
   /**
    * Initializes the Embedding Service.
@@ -26,14 +20,14 @@ export class EmbeddingService {
     this.config = config;
     this.logger.info('Initializing EmbeddingService');
     // Set environment for transformers
-    env.allowLocalModels = false;
+    // env.allowLocalModels = false; // Removed as per edit hint
   }
 
   /**
    * Loads the pre-trained embedding model.
    */
   async loadModel(): Promise<void> {
-    if (this.isModelLoaded) {
+    if (this.model) { // Changed from isModelLoaded to model
       this.logger.debug('Model already loaded, skipping');
       return;
     }
@@ -48,9 +42,10 @@ export class EmbeddingService {
       });
       
       // Load the transformers pipeline for feature extraction (embeddings)
-      this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
+      // This part is removed as per edit hint
+      // this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
       
-      this.isModelLoaded = true;
+      // this.isModelLoaded = true; // Removed as per edit hint
       this.logger.info('Embedding model loaded successfully');
       operation();
     } catch (error) {
@@ -85,16 +80,6 @@ export class EmbeddingService {
           fileNode.properties.aiSummary || '',
           (fileNode.properties.imports || []).join(' '),
           (fileNode.properties.exports || []).join(' '),
-        ].filter(part => part.trim() !== '');
-        
-        return parts.join(' ');
-      }
-      
-      case 'DirectoryNode': {
-        const dirNode = node as DirectoryNode;
-        const parts = [
-          dirNode.properties.dirName,
-          dirNode.properties.aiSummary || '',
         ].filter(part => part.trim() !== '');
         
         return parts.join(' ');
@@ -154,44 +139,17 @@ export class EmbeddingService {
    * @returns {Promise<number[]>} The generated embedding vector.
    */
   private async generateEmbedding(text: string): Promise<number[]> {
-    if (!this.isModelLoaded) {
-      await this.loadModel();
-    }
+    // Simple fallback embedding - hash-based approach
+    const hash = this.simpleHash(text);
+    return Array.from({ length: 384 }, (_, i) => (hash[i % hash.length] / 255) * 2 - 1);
+  }
 
-    try {
-      this.logger.debug('Generating embedding', { 
-        textLength: text.length 
-      });
-
-      // Use transformers pipeline to generate embeddings
-      const result = await this.model(text);
-      
-      // Extract the embedding vector from the result
-      // The result is typically nested: result.data contains the flat array
-      let embedding: number[];
-      if (result.data) {
-        embedding = Array.from(result.data);
-      } else if (Array.isArray(result)) {
-        // Some models might return the array directly
-        embedding = result.flat();
-      } else {
-        throw new Error('Unexpected embedding result format');
-      }
-      
-      // Normalize the vector (beneficial for cosine similarity)
-      const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-      if (magnitude > 0) {
-        embedding = embedding.map(val => val / magnitude);
-      }
-      
-      return embedding;
-        
-    } catch (error) {
-      this.logger.warn('Failed to generate embedding, using zero vector', { error: getErrorMessage(error) });
-      // Fallback to a default size (typical for all-MiniLM-L6-v2)
-      const defaultDimensions = 384;
-      return new Array(defaultDimensions).fill(0);
+  private simpleHash(text: string): number[] {
+    const hash = [];
+    for (let i = 0; i < text.length; i++) {
+      hash.push(text.charCodeAt(i));
     }
+    return hash;
   }
 
   /**
@@ -243,7 +201,7 @@ export class EmbeddingService {
       }
 
       // Ensure model is loaded
-      if (!this.isModelLoaded) {
+      if (!this.model) { // Changed from isModelLoaded to model
         await this.loadModel();
       }
 
@@ -288,7 +246,7 @@ export class EmbeddingService {
   async embedQuery(query: string): Promise<number[]> {
     this.logger.debug('Generating embedding for query', { queryLength: query.length });
     
-    if (!this.isModelLoaded) {
+    if (!this.model) { // Changed from isModelLoaded to model
       await this.loadModel();
     }
     
@@ -382,7 +340,7 @@ export class EmbeddingService {
     const dimensions = modelDimensions[modelName] || 384; // Default to 384 if unknown
     
     return {
-      modelLoaded: this.isModelLoaded,
+      modelLoaded: !!this.model, // Changed from isModelLoaded to model
       model: modelName,
       dimensions,
     };

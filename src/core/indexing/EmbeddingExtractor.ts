@@ -4,7 +4,6 @@ import {
   NodeWithEmbedding,
   CodeNode,
   FileNode,
-  DirectoryNode,
   RepositoryNode,
   TestNode,
   FunctionNode,
@@ -23,7 +22,6 @@ export class EmbeddingExtractor {
     nodes: (
       | CodeNode
       | FileNode
-      | DirectoryNode
       | RepositoryNode
       | TestNode
       | FunctionNode

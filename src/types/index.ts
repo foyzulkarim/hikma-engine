@@ -7,7 +7,6 @@
 export type NodeType = 
   | 'CodeNode'
   | 'FileNode'
-  | 'DirectoryNode'
   | 'CommitNode'
   | 'DiscussionNode'
   | 'AnnotationNode'
@@ -68,26 +67,13 @@ export interface FileNode extends BaseNode {
     fileName: string;
     fileExtension: string;
     repoId: string;
-    language: string;
-    sizeKb: number;
-    contentHash: string;
-    fileType: 'source' | 'test' | 'config' | 'dev' | 'vendor';
-    aiSummary?: string;
-    imports?: string[];
-    exports?: string[];
-  };
-}
-
-/**
- * Represents a directory in the file system.
- */
-export interface DirectoryNode extends BaseNode {
-  type: 'DirectoryNode';
-  properties: {
-    dirPath: string;
-    dirName: string;
-    repoId: string;
-    aiSummary?: string; // AI-generated summary of the directory's purpose/content
+    language?: string;
+    sizeKb?: number;
+    contentHash?: string;
+    fileType?: string;
+    aiSummary?: string; // AI-generated summary of the file's purpose/content
+    imports?: string[]; // List of imported modules
+    exports?: string[]; // List of exported symbols
   };
 }
 

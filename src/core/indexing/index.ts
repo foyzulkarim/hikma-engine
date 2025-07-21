@@ -1,4 +1,3 @@
-export * from './Indexer';
 export * from './FileDiscovery';
 export * from './AstExtractor';
 export * from './GitExtractor';

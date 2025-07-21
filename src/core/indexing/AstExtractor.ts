@@ -1,7 +1,7 @@
 import { AstParser } from '../../modules/ast-parser';
 import { ConfigManager } from '../../config';
 import { FileMetadata } from '../../modules/file-scanner';
-import { CodeNode, FileNode, DirectoryNode, TestNode, FunctionNode, Edge } from '../../types';
+import { CodeNode, FileNode, TestNode, FunctionNode, Edge } from '../../types';
 
 export class AstExtractor {
   private astParser: AstParser;
@@ -14,7 +14,7 @@ export class AstExtractor {
     files: FileMetadata[],
     pathToIdMap: Map<string, string>,
   ): Promise<{
-    nodes: (CodeNode | FileNode | DirectoryNode | TestNode | FunctionNode)[];
+    nodes: (CodeNode | FileNode | TestNode | FunctionNode)[];
     edges: Edge[];
   }> {
     await this.astParser.parseFiles(

@@ -53,6 +53,29 @@ class HikmaEngineCLI {
         case '--dry-run':
           options.dryRun = true;
           break;
+        case '--phases':
+          if (i + 1 < args.length) {
+            options.runPhases = args[++i].split(',').map(Number);
+          }
+          break;
+        case '--from-phase':
+          if (i + 1 < args.length) {
+            options.fromPhase = Number(args[++i]);
+          }
+          break;
+        case '--force-phases':
+          if (i + 1 < args.length) {
+            options.forcePhases = args[++i].split(',').map(Number);
+          }
+          break;
+        case '--inspect-phase':
+          if (i + 1 < args.length) {
+            options.inspectPhase = Number(args[++i]);
+          }
+          break;
+        case '--status':
+          options.showStatus = true;
+          break;
         case '--help':
         case '-h':
           this.printHelp();
@@ -82,18 +105,30 @@ Usage: npm start [project-path] [options]
 Arguments:
   project-path          Path to the project to index (default: current directory)
 
-Options:
+Basic Options:
   -f, --force-full      Force full indexing (ignore incremental updates)
   --skip-ai-summary     Skip AI summary generation
   --skip-embeddings     Skip vector embedding generation
   --dry-run             Perform indexing without persisting data
   -h, --help            Show this help message
 
+Phase Control Options:
+  --phases 1,2,3        Run only specific phases (comma-separated)
+  --from-phase 2        Start from specific phase (runs 2,3,4)
+  --force-phases 1,3    Force re-run specific phases
+  --inspect-phase 1     Show phase 1 data and exit
+  --status              Show status of all phases
+
 Examples:
-  npm start                           # Index current directory
+  npm start                           # Index current directory (all phases)
   npm start /path/to/project          # Index specific project
   npm start --force-full              # Force full re-indexing
   npm start --dry-run                 # Test run without persistence
+  npm start --phases 1,2              # Only run discovery and parsing
+  npm start --from-phase 3            # Start from AI enrichment
+  npm start --force-phases 2          # Re-run structure extraction
+  npm start --inspect-phase 1         # Show discovered files
+  npm start --status                  # Show phase completion status
     `);
   }
 

@@ -2,32 +2,47 @@ import { SQLiteClient } from './connection';
 import {
   RepositoryModel,
   FileModel,
-  DirectoryModel,
-  CodeNodeModel,
-  TestNodeModel,
-  PullRequestModel,
-  CommitModel,
-  FunctionModel,
+  PhaseStatusModel,
+  GraphNodeModel,
 } from '../models';
-import { generateCreateTableCommand } from '../utils/schema-generator';
+import { generateCreateTableCommand, generateIndexes } from '../utils/schema-generator';
 
 export function initializeTables(client: SQLiteClient): void {
   const db = client.getDb();
 
-  db.exec(generateCreateTableCommand(new RepositoryModel({} as any)));
-  db.exec(generateCreateTableCommand(new DirectoryModel({} as any)));
-  db.exec(generateCreateTableCommand(new FileModel({} as any)));
-  db.exec(generateCreateTableCommand(new CodeNodeModel({} as any)));
-  db.exec(generateCreateTableCommand(new TestNodeModel({} as any)));
-  db.exec(generateCreateTableCommand(new PullRequestModel({} as any)));
-  db.exec(generateCreateTableCommand(new CommitModel({} as any)));
-  db.exec(generateCreateTableCommand(new FunctionModel({} as any)));
-  db.exec(generateCreateTableCommand(new IndexingStateModel({} as any)));
-  db.exec(generateCreateTableCommand(new GraphNodeModel({} as any)));
-  db.exec(generateCreateTableCommand(new GraphEdgeModel({} as any)));
-  db.exec(generateCreateTableCommand(new FileImportModel({} as any)));
-  db.exec(generateCreateTableCommand(new FileRelationModel({} as any)));
-  db.exec(generateCreateTableCommand(new FileCommitModel({} as any)));
-  db.exec(generateCreateTableCommand(new FunctionCallModel({} as any)));
-  db.exec(generateCreateTableCommand(new FunctionCommitModel({} as any)));
+  // Create core tables
+  db.exec(generateCreateTableCommand(new RepositoryModel(new (class extends Object {})() as any)));
+  db.exec(generateCreateTableCommand(new FileModel(new (class extends Object {})() as any)));
+  db.exec(generateCreateTableCommand(new PhaseStatusModel(new (class extends Object {})() as any)));
+  db.exec(generateCreateTableCommand(new GraphNodeModel(new (class extends Object {})() as any)));
+  
+  // Create indexes for performance
+  const repositoryIndexes = generateIndexes('repositories', {
+    'path': ['repo_path'],
+    'name': ['repo_name']
+  });
+  
+  const fileIndexes = generateIndexes('files', {
+    'repo_id': ['repo_id'],
+    'path': ['file_path'],
+    'type': ['file_type'],
+    'language': ['language'],
+    'hash': ['content_hash']
+  });
+  
+  const graphNodeIndexes = generateIndexes('graph_nodes', {
+    'repo_type': ['repo_id', 'node_type'],
+    'file_path': ['file_path'],
+    'business_key': ['business_key'],
+    'signature': ['signature_hash']
+  });
+  
+  const phaseIndexes = generateIndexes('phase_status', {
+    'repo_phase': ['repo_id', 'phase_name'],
+    'status': ['status']
+  });
+  
+  [...repositoryIndexes, ...fileIndexes, ...graphNodeIndexes, ...phaseIndexes].forEach(indexSql => {
+    db.exec(indexSql);
+  });
 }

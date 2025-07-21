@@ -1,28 +1,26 @@
 /**
- * @file Parses source code files to extract Abstract Syntax Tree (AST) information.
- *       It identifies and creates various node types (CodeNode, FileNode, DirectoryNode,
- *       TestNode, FunctionNode) and their relationships (edges) within the knowledge graph.
+ * @file Responsible for parsing AST of supported languages and extracting code structure.
+ *       It identifies and creates various node types (CodeNode, FileNode,
+ *       TestNode, FunctionNode) and their relationships (edges).
+ *       Polyglot AST parser supporting multiple languages.
  */
 
-import * as ts from 'typescript';
-import * as fs from 'fs';
-import * as path from 'path';
-import { CodeNode, FileNode, DirectoryNode, Edge, TestNode, FunctionNode } from '../types';
+import { CodeNode, FileNode, Edge, TestNode, FunctionNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as ts from 'typescript';
 
-/**
- * Parses source code files to extract structured data for the knowledge graph.
- */
 export class AstParser {
-  private projectRoot: string;
   private config: ConfigManager;
   private logger = getLogger('AstParser');
-  private nodes: (CodeNode | FileNode | DirectoryNode | TestNode | FunctionNode)[] = [];
+  private projectRoot: string;
+  private repoId: string;
+  private nodes: (CodeNode | FileNode | TestNode | FunctionNode)[] = [];
   private edges: Edge[] = [];
   private pathToIdMap: Map<string, string> = new Map();
-  private repoId: string;
 
   /**
    * @param {string} projectRoot - The absolute path to the root of the project.
@@ -65,7 +63,7 @@ export class AstParser {
       this.pathToIdMap = idMap;
 
       /* basic file/dir nodes first */
-      this.createFileAndDirectoryNodes(filePaths);
+      this.createFileNodes(filePaths);
 
       /* per-file detailed parsing */
       for (const filePath of filePaths) {
@@ -132,7 +130,6 @@ export class AstParser {
   private createNodeId(type: string, props: Record<string, any>): string {
     switch (type) {
       case 'FileNode': return `file:${props.filePath}`;
-      case 'DirectoryNode': return `dir:${props.dirPath}`;
       case 'CodeNode': return `code:${props.filePath}:${props.name}:${props.startLine}:${props.startColumn || 0}`;
       case 'TestNode': return `test:${props.filePath}:${props.name}:${props.startLine}:${props.startColumn || 0}`;
       case 'FunctionNode': return `func:${props.filePath}:${props.name}:${props.startLine}:${props.startColumn || 0}`;
@@ -346,59 +343,16 @@ export class AstParser {
   }
 
   /* ------------------------------------------------------------------ */
-  /* File / Directory nodes & edges                                     */
+  /* File nodes only - directories removed                             */
   /* ------------------------------------------------------------------ */
 
-  private createFileAndDirectoryNodes(filePaths: string[]): void {
-    const seenDirs = new Set<string>();
-    for (const filePath of filePaths) {
-      const relPath = path.relative(this.projectRoot, filePath);
-      const fileName = path.basename(filePath);
-      const ext = path.extname(filePath);
-      const language = this.detectLanguage(filePath);
-      
-      // Get file stats for size calculation
-      let sizeKb = 0;
-      try {
-        const stats = fs.statSync(filePath);
-        sizeKb = Math.round(stats.size / 1024);
-      } catch (err) {
-        this.logger.warn(`Failed to get file stats for ${filePath}`, { error: getErrorMessage(err) });
-      }
-
-      // Determine file type based on path and extension
-      const fileType = this.determineFileType(filePath);
-      
-      // Generate content hash (simple hash based on file path for now)
-      const contentHash = this.generateContentHash(relPath);
-
-      // FileNode is created by the indexer, not the AST parser
-      // The AST parser only creates structural nodes within files
-
-      let dir = path.dirname(filePath);
-      while (dir !== this.projectRoot && !seenDirs.has(dir)) {
-        const relDir = path.relative(this.projectRoot, dir);
-        const dirName = path.basename(dir);
-
-        const dn: DirectoryNode = {
-          id: this.createNodeId('DirectoryNode', { dirPath: dir }),
-          type: 'DirectoryNode',
-          properties: { 
-            dirPath: relDir, 
-            dirName,
-            repoId: this.repoId
-          },
-        };
-        this.nodes.push(dn);
-        seenDirs.add(dir);
-        dir = path.dirname(dir);
-      }
-    }
+  private createFileNodes(filePaths: string[]): void {
+    // FileNode creation is now handled by NodeCreator in the indexing pipeline
+    // This method is no longer needed but kept for compatibility
   }
 
   private createEdges(): void {
     const files = this.nodes.filter(n => n.type === 'FileNode') as FileNode[];
-    const dirs = this.nodes.filter(n => n.type === 'DirectoryNode') as DirectoryNode[];
     const codes = this.nodes.filter(n => n.type === 'CodeNode') as CodeNode[];
     const tests = this.nodes.filter(n => n.type === 'TestNode') as TestNode[];
 
@@ -410,23 +364,7 @@ export class AstParser {
       if (f) this.edges.push({ source: n.id, target: f.id, type: 'DEFINED_IN' });
     });
 
-    // Directory -> File
-    files.forEach(fi => {
-      const p = path.resolve(this.projectRoot, fi.properties.filePath);
-      const d = dirs.find(di =>
-        path.resolve(this.projectRoot, di.properties.dirPath) === path.dirname(p)
-      );
-      if (d) this.edges.push({ source: d.id, target: fi.id, type: 'CONTAINS' });
-    });
-
-    // Directory -> Directory
-    dirs.forEach(di => {
-      const p = path.resolve(this.projectRoot, di.properties.dirPath);
-      const parent = dirs.find(d =>
-        path.resolve(this.projectRoot, d.properties.dirPath) === path.dirname(p)
-      );
-      if (parent) this.edges.push({ source: parent.id, target: di.id, type: 'CONTAINS' });
-    });
+    // Note: Directory relationships are no longer created since DirectoryNode is removed
   }
 
   /* ------------------------------------------------------------------ */

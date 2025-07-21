@@ -1,20 +1,16 @@
 import { BaseModel } from './base.model';
-import { IndexingStateDTO } from './IndexingStateDTO';
+import { RepositoryDTO } from './RepositoryDTO';
 
-export class IndexingStateModel extends BaseModel<IndexingStateDTO> {
-  constructor(dto: IndexingStateDTO) {
-    super(dto);
-  }
-
+export class RepositoryModel extends BaseModel<RepositoryDTO> {
   getTableName(): string {
-    return 'indexing_state';
+    return 'repositories';
   }
 
   getSchema(): Record<string, string> {
     return {
       id: 'TEXT PRIMARY KEY',
-      key: 'TEXT NOT NULL',
-      value: 'TEXT NOT NULL',
+      repo_path: 'TEXT NOT NULL',
+      repo_name: 'TEXT NOT NULL',
       created_at: 'DATETIME DEFAULT CURRENT_TIMESTAMP',
       updated_at: 'DATETIME DEFAULT CURRENT_TIMESTAMP'
     };

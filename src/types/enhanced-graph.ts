@@ -6,7 +6,6 @@
 export type EnhancedNodeType = 
   | 'Repository'
   | 'Commit'
-  | 'Directory' 
   | 'File'
   | 'Module'
   | 'Function'
@@ -88,15 +87,6 @@ export interface CommitNode extends EnhancedBaseNode {
     author: string;
     timestamp: string;
     isMerge: boolean;
-  };
-}
-
-export interface DirectoryNode extends EnhancedBaseNode {
-  type: 'Directory';
-  businessKey: string; // repoId@rev:dirPath
-  properties: {
-    path: string;
-    depth: number;
   };
 }
 
@@ -208,7 +198,6 @@ export interface TestCaseNode extends EnhancedBaseNode {
 export type EnhancedNode = 
   | RepositoryNode
   | CommitNode
-  | DirectoryNode
   | EnhancedFileNode
   | ModuleNode
   | EnhancedFunctionNode
@@ -226,10 +215,6 @@ export class BusinessKeyGenerator {
 
   static commit(sha: string): string {
     return sha;
-  }
-
-  static directory(repoId: string, commitSha: string, dirPath: string): string {
-    return `${repoId}@${commitSha}:${dirPath}`;
   }
 
   static file(repoId: string, commitSha: string, filePath: string): string {

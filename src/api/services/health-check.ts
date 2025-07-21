@@ -182,8 +182,15 @@ export class HealthCheckService {
         // Check if vector extension is available
         const vectorAvailable = await sqliteClient.isVectorSearchAvailable();
         
-        // Get basic stats
+        // Get database statistics
         const stats = await sqliteClient.getIndexingStats();
+        const dbHealth = {
+          status: 'healthy' as const,
+          totalFiles: stats.totalFiles || 0,
+          totalCommits: stats.totalCommits || 0,
+          lastIndexed: stats.lastIndexed,
+          message: 'Database accessible and functioning'
+        };
         
         // Test basic query
         const testResult = sqliteClient.get('SELECT 1 as test');
@@ -196,9 +203,8 @@ export class HealthCheckService {
           details: {
             vectorExtensionAvailable: vectorAvailable,
             totalFiles: stats.totalFiles || 0,
-            totalDirectories: stats.totalDirectories || 0,
             totalCommits: stats.totalCommits || 0,
-            totalCodeNodes: stats.totalCodeNodes || 0,
+            lastIndexed: stats.lastIndexed,
             isConnected: sqliteClient.isConnectedToDatabase()
           },
         };

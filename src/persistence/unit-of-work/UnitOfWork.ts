@@ -2,12 +2,7 @@ import { IUnitOfWork } from './IUnitOfWork';
 import {
   RepositoryRepository,
   FileRepository,
-  DirectoryRepository,
   CodeNodeRepository,
-  TestNodeRepository,
-  PullRequestRepository,
-  CommitRepository,
-  FunctionRepository,
   IndexingStateRepository,
   GraphNodeRepository,
   GraphEdgeRepository,
@@ -35,28 +30,8 @@ export class UnitOfWork implements IUnitOfWork {
     );
     this.repositories.set(FileRepository.name, new FileRepository(this.db));
     this.repositories.set(
-      DirectoryRepository.name,
-      new DirectoryRepository(this.db),
-    );
-    this.repositories.set(
       CodeNodeRepository.name,
       new CodeNodeRepository(this.db),
-    );
-    this.repositories.set(
-      TestNodeRepository.name,
-      new TestNodeRepository(this.db),
-    );
-    this.repositories.set(
-      PullRequestRepository.name,
-      new PullRequestRepository(this.db),
-    );
-    this.repositories.set(
-      CommitRepository.name,
-      new CommitRepository(this.db),
-    );
-    this.repositories.set(
-      FunctionRepository.name,
-      new FunctionRepository(this.db),
     );
     this.repositories.set(
       IndexingStateRepository.name,

@@ -1,12 +1,15 @@
 import {
   RepositoryRepository,
   FileRepository,
-  DirectoryRepository,
   CodeNodeRepository,
-  TestNodeRepository,
-  PullRequestRepository,
-  CommitRepository,
-  FunctionRepository,
+  IndexingStateRepository,
+  GraphNodeRepository,
+  GraphEdgeRepository,
+  FileImportRepository,
+  FileRelationRepository,
+  FileCommitRepository,
+  FunctionCallRepository,
+  FunctionCommitRepository,
 } from '../repositories';
 
 export interface IUnitOfWork {

@@ -1,8 +1,9 @@
 import { GenericRepository } from '../repository/GenericRepository';
-import { CodeNodeDTO } from '../models/CodeNodeDTO';
+import { Database } from 'better-sqlite3';
+import { GraphNodeDTO } from '../models/GraphNodeDTO'; // Use GraphNodeDTO instead
 
-export class CodeNodeRepository extends GenericRepository<CodeNodeDTO> {
-  constructor(db: any) {
-    super('code_nodes');
+export class CodeNodeRepository extends GenericRepository<GraphNodeDTO> {
+  constructor(db: Database) {
+    super(db, 'code_nodes');
   }
 }

@@ -1,57 +1,81 @@
+import { Database } from 'better-sqlite3';
 import { SQLiteClient } from './connection';
 
-export async function getIndexingStats(
-  client: SQLiteClient,
-): Promise<{
+export interface DatabaseStats {
   totalFiles: number;
-  totalDirectories: number;
-  totalCommits: number;
   totalCodeNodes: number;
+  totalCommits: number;
   totalTestNodes: number;
   totalPullRequests: number;
+  totalFunctions: number;
   lastIndexed: string | null;
-}> {
-  const db = client.getDb();
-  const fileCount =
-    (db.prepare('SELECT COUNT(*) as count FROM files').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const dirCount =
-    (db.prepare('SELECT COUNT(*) as count FROM directories').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const commitCount =
-    (db.prepare('SELECT COUNT(*) as count FROM commits').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const codeNodeCount =
-    (db.prepare('SELECT COUNT(*) as count FROM code_nodes').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const testNodeCount =
-    (db.prepare('SELECT COUNT(*) as count FROM test_nodes').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const pullRequestCount =
-    (db.prepare('SELECT COUNT(*) as count FROM pull_requests').get() as {
-      count: number;
-    } | undefined)?.count || 0;
-  const lastIndexed =
-    (
-      db
-        .prepare('SELECT value FROM indexing_state WHERE key = ?')
-        .get('last_indexed_commit') as { value: string } | undefined
-    )?.value || null;
+  indexingDuration: number | null;
+  dbSizeKb: number;
+}
 
-  return {
-    totalFiles: fileCount,
-    totalDirectories: dirCount,
-    totalCommits: commitCount,
-    totalCodeNodes: codeNodeCount,
-    totalTestNodes: testNodeCount,
-    totalPullRequests: pullRequestCount,
-    lastIndexed,
-  };
+export async function getDatabaseStats(db: Database): Promise<DatabaseStats> {
+  try {
+    const [
+      fileCount,
+      codeCount,
+      commitCount,
+      testCount,
+      prCount,
+      functionCount,
+    ] = await Promise.all([
+      (db.prepare('SELECT COUNT(*) as count FROM files').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+      (db.prepare('SELECT COUNT(*) as count FROM code_nodes').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+      (db.prepare('SELECT COUNT(*) as count FROM commits').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+      (db.prepare('SELECT COUNT(*) as count FROM test_nodes').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+      (db.prepare('SELECT COUNT(*) as count FROM pull_requests').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+      (db.prepare('SELECT COUNT(*) as count FROM functions').get() as {
+        count: number;
+      } | undefined)?.count || 0,
+    ]);
+
+    // Get last indexed information
+    const lastIndexedResult = db
+      .prepare('SELECT value FROM indexing_state WHERE key = ?')
+      .get('last_indexed_commit') as { value: string } | undefined;
+    const lastIndexed = lastIndexedResult?.value || null;
+
+    // Get indexing duration (placeholder for now)
+    const indexingDuration = null;
+
+    // Calculate database size
+    const dbPath = (db as any).name;
+    let dbSizeKb = 0;
+    try {
+      const stats = require('fs').statSync(dbPath);
+      dbSizeKb = Math.round(stats.size / 1024);
+    } catch (error) {
+      // Database size unavailable
+    }
+
+    return {
+      totalFiles: fileCount,
+      totalCodeNodes: codeCount,
+      totalCommits: commitCount,
+      totalTestNodes: testCount,
+      totalPullRequests: prCount,
+      totalFunctions: functionCount,
+      lastIndexed,
+      indexingDuration,
+      dbSizeKb,
+    };
+  } catch (error) {
+    throw new Error(`Failed to get database stats: ${error}`);
+  }
 }
 
 export async function getEnhancedGraphStats(
