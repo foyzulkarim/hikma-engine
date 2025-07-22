@@ -8,6 +8,7 @@
     "api": "ts-node src/api/index.ts",
     "api:dev": "ts-node src/api/index.ts",
     "search": "ts-node src/cli/search.ts",
+    "graph-query": "ts-node src/cli/graph-query.ts",
     "build": "tsc",
     "dev": "ts-node src/index.ts",
     "test": "jest",

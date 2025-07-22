@@ -4,7 +4,8 @@ import {
   RepositoryDTO, 
   FileDTO, 
   PhaseStatusDTO,
-  GraphNodeDTO 
+  GraphNodeDTO,
+  GraphEdgeDTO 
 } from './models';
 
 /**
@@ -16,6 +17,7 @@ export class PhaseRepository {
   private fileRepo: GenericRepository<FileDTO>;
   private phaseStatusRepo: GenericRepository<PhaseStatusDTO>;
   private graphNodeRepo: GenericRepository<GraphNodeDTO>;
+  private graphEdgeRepo: GenericRepository<GraphEdgeDTO>;
 
   constructor(db: Database) {
     this.db = db;
@@ -23,6 +25,7 @@ export class PhaseRepository {
     this.fileRepo = new GenericRepository(db, 'files');
     this.phaseStatusRepo = new GenericRepository(db, 'phase_status');
     this.graphNodeRepo = new GenericRepository(db, 'graph_nodes');
+    this.graphEdgeRepo = new GenericRepository(db, 'graph_edges');
   }
 
   // ============================================================================
@@ -111,6 +114,7 @@ export class PhaseRepository {
   async persistPhase2Data(data: {
     repoId: string;
     astNodes: any[];
+    astEdges?: any[];
   }): Promise<void> {
     const transaction = this.db.transaction(() => {
       // Convert AST nodes to GraphNodeDTOs
@@ -120,6 +124,12 @@ export class PhaseRepository {
       if (graphNodeDTOs.length > 0) {
         this.graphNodeRepo.batchAdd(graphNodeDTOs);
       }
+
+      // Convert AST edges to GraphEdgeDTOs and save them
+      if (data.astEdges && data.astEdges.length > 0) {
+        const graphEdgeDTOs = data.astEdges.map(edge => this.convertAstEdgeToGraphEdgeDTO(edge));
+        this.graphEdgeRepo.batchAdd(graphEdgeDTOs);
+      }
     });
     
     transaction();
@@ -127,30 +137,46 @@ export class PhaseRepository {
 
   async loadPhase2Data(repoId: string): Promise<{
     astNodes: GraphNodeDTO[];
+    astEdges: GraphEdgeDTO[];
   }> {
     const astNodes = await this.graphNodeRepo.search({ 
-      repo_id: repoId,
-      node_type: 'FunctionNode'
+      repo_id: repoId
     });
     
-    return { astNodes };
+    // Load edges by finding all edges where source or target nodes belong to this repo
+    const nodeIds = astNodes.map(node => node.id);
+    const astEdges: GraphEdgeDTO[] = [];
+    
+    if (nodeIds.length > 0) {
+      // This is a simplified approach - in practice you might want to optimize this query
+      const allEdges = await this.graphEdgeRepo.getAll();
+      astEdges.push(...allEdges.filter(edge => 
+        nodeIds.includes(edge.source_id) || nodeIds.includes(edge.target_id)
+      ));
+    }
+    
+    return { astNodes, astEdges };
   }
 
   private convertAstNodeToGraphNodeDTO(astNode: any, repoId: string): GraphNodeDTO {
     // Extract key properties for easier querying
     const properties = astNode.properties;
     
+    // Ensure all IDs are strings
+    const nodeId = typeof astNode.id === 'string' ? astNode.id : String(astNode.id);
+    const nodeType = typeof astNode.type === 'string' ? astNode.type : String(astNode.type);
+    
     return new GraphNodeDTO(
-      astNode.id,
-      astNode.id, // business_key same as id for AST nodes
-      astNode.type,
+      nodeId,
+      nodeId, // business_key same as id for AST nodes
+      nodeType,
       JSON.stringify(properties), // Store all properties as JSON
       {
         repo_id: repoId,
-        file_path: properties.filePath,
-        line: properties.startLine,
-        col: properties.startColumn || 0,
-        signature_hash: this.generateSignatureHash(properties.signature || properties.name)
+        file_path: properties?.filePath ? String(properties.filePath) : undefined,
+        line: typeof properties?.startLine === 'number' ? properties.startLine : undefined,
+        col: typeof properties?.startColumn === 'number' ? properties.startColumn : 0,
+        signature_hash: this.generateSignatureHash(properties?.signature || properties?.name || nodeId)
       }
     );
   }
@@ -158,6 +184,29 @@ export class PhaseRepository {
   private generateSignatureHash(signature: string): string {
     // Simple hash for signature - could be made more sophisticated
     return require('crypto').createHash('md5').update(signature).digest('hex');
+  }
+
+  private convertAstEdgeToGraphEdgeDTO(astEdge: any): GraphEdgeDTO {
+    // Ensure all IDs are strings
+    const edgeId = typeof astEdge.id === 'string' ? astEdge.id : String(astEdge.id || `edge_${Date.now()}_${Math.random()}`);
+    const sourceId = typeof astEdge.source === 'string' ? astEdge.source : String(astEdge.source);
+    const targetId = typeof astEdge.target === 'string' ? astEdge.target : String(astEdge.target);
+    const edgeType = typeof astEdge.type === 'string' ? astEdge.type : String(astEdge.type);
+    
+    return new GraphEdgeDTO(
+      edgeId,
+      sourceId,
+      targetId,
+      sourceId, // business_key same as source for AST edges
+      targetId, // business_key same as target for AST edges
+      edgeType,
+      {
+        properties: astEdge.properties ? JSON.stringify(astEdge.properties) : undefined,
+        line: typeof astEdge.line === 'number' ? astEdge.line : undefined,
+        col: typeof astEdge.col === 'number' ? astEdge.col : undefined,
+        dynamic: Boolean(astEdge.dynamic)
+      }
+    );
   }
 
   // ============================================================================
