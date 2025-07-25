@@ -168,7 +168,11 @@ Examples:
       console.log('✓ Indexing completed');
 
       // Log results
-      logger.info('Indexing completed successfully', result);
+      const resultForLogging = {
+        ...result,
+        phases: result.phases.map(({ data, ...phase }) => phase),
+      };
+      logger.info('Indexing completed successfully', resultForLogging);
       
       console.log('\n=== Indexing Results ===');
       console.log(`Project: ${this.projectRoot}`);

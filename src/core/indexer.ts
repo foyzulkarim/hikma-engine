@@ -58,8 +58,17 @@ export class Indexer {
       // Execute phases
       const result = await this.phaseManager.executePhases(phaseOptions);
       
-      this.logger.info('Indexing pipeline completed successfully', result);
-      return result;      
+      // Create a sanitized result for logging, removing the verbose 'data' field
+      const resultForLogging = {
+        ...result,
+        phases: result.phases.map(({ data, ...phase }) => phase),
+      };
+
+      this.logger.info(
+        'Indexing pipeline completed successfully',
+        resultForLogging
+      );
+      return result;
     } catch (error) {
       logError(this.logger, 'Indexing pipeline failed', error);
       this.errors.push(getErrorMessage(error));
