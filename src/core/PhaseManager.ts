@@ -355,10 +355,6 @@ export class PhaseManager {
     const allNodes = [];
     const allEdges = [];
 
-    // Add file nodes from phase 1
-    if (context.phase1Data?.files) {
-      allNodes.push(...context.phase1Data.files);
-    }
 
     // Add AST nodes and edges from phase 2
     if (context.phase2Data?.astNodes) {
@@ -375,27 +371,42 @@ export class PhaseManager {
       context.phase3Data.summaries.forEach((node: any) => {
         summaryMap.set(node.id, node);
       });
-      
+
       // Update existing nodes with summaries or add new ones
-       for (let i = 0; i < allNodes.length; i++) {
-         const existingNode: any = allNodes[i];
-         if (summaryMap.has(existingNode.id)) {
-           allNodes[i] = summaryMap.get(existingNode.id);
-           summaryMap.delete(existingNode.id);
-         }
-       }
-      
-      // Add any remaining summary nodes that weren't merged
-      allNodes.push(...Array.from(summaryMap.values()));
+      for (let i = 0; i < allNodes.length; i++) {
+        const existingNode: any = allNodes[i];
+        if (summaryMap.has(existingNode.id)) {
+          allNodes[i] = summaryMap.get(existingNode.id);
+          summaryMap.delete(existingNode.id);
+        }
+      }
     }
 
-    this.logger.info(`Phase 4 final assembly completed`, {
-      totalNodes: allNodes.length,
+    // Phase 4 Part 2: Vector Embeddings
+    if (context.options.skipEmbeddings) {
+      this.logger.info('Skipping vector embedding generation.');
+      return {
+        finalNodes: allNodes,
+        finalEdges: allEdges,
+      };
+    }
+
+    this.logger.info('Starting vector embedding generation...');
+
+    // types of the nodes for logging purpose
+    const tempNodes = allNodes.filter((node) => node.type === undefined);
+    this.logger.info(`filtered nodes: ${tempNodes.length}`, tempNodes);
+
+    const embeddingExtractor = new EmbeddingExtractor(this.config);
+    const nodesWithEmbeddings = await embeddingExtractor.extract(allNodes);
+
+    this.logger.info(`Phase 4 final assembly and embedding completed`, {
+      totalNodes: nodesWithEmbeddings.length,
       totalEdges: allEdges.length
     });
 
     return {
-      finalNodes: allNodes,
+      finalNodes: nodesWithEmbeddings,
       finalEdges: allEdges,
     };
   }
@@ -416,7 +427,14 @@ export class PhaseManager {
           astEdges: data.astEdges || []
         });
         break;
-      // TODO: Add other phases
+      case 4:
+        await this.phaseRepo.persistPhase4Data({
+          repoId,
+          finalNodes: data.finalNodes || [],
+          finalEdges: data.finalEdges || []
+        });
+        break;
+      // TODO: Add phase 3
     }
   }
 
@@ -486,7 +504,7 @@ export class PhaseManager {
       // Create repository record
       const nodeCreator = new NodeCreator();
       const repoNode = nodeCreator.createRepositoryNode(this.projectRoot);
-      
+
       const repositoryDTO = new RepositoryDTO(
         repoId, // Use consistent repo ID
         repoNode.properties.repoPath,
@@ -501,8 +519,8 @@ export class PhaseManager {
 
       this.logger.debug('Repository record created', { repoId, repoPath: repositoryDTO.repo_path });
     } catch (error) {
-      this.logger.warn('Failed to ensure repository exists, will create during Phase 1', { 
-        error: (error as Error).message 
+      this.logger.warn('Failed to ensure repository exists, will create during Phase 1', {
+        error: (error as Error).message
       });
       // Don't throw - Phase 1 will handle repository creation
     }

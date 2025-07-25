@@ -1,5 +1,7 @@
 export * from './base.dto';
 export * from './base.model';
+export * from './EmbeddingNodeDTO';
+export * from './EmbeddingNodeModel';
 export * from './FileCommitDTO';
 export * from './FileCommitModel';
 export * from './FileDTO';

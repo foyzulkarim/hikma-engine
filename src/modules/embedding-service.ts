@@ -2,7 +2,7 @@
  * @file Responsible for generating vector embeddings for various node types.
  */
 
-import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, RepositoryNode, CommitNode, TestNode, PullRequestNode } from '../types';
+import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, RepositoryNode, CommitNode, TestNode, PullRequestNode, FunctionNode } from '../types';
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
@@ -141,9 +141,21 @@ export class EmbeddingService {
         
         return parts.join(' ');
       }
+
+      // FunctionNode
+      case 'FunctionNode': {
+        const functionNode = node as FunctionNode;
+        const parts = [
+          functionNode.properties.name,
+          functionNode.properties.signature || '',
+          functionNode.properties.body || '',
+        ].filter(part => part.trim() !== '');
+        
+        return parts.join(' ');
+      }
       
       default:
-        this.logger.warn(`Unknown node type for text extraction: ${node.type}`);
+        this.logger.warn(`Unknown node type for text extraction:`, node);
         return `${node.type} ${node.id}`;
     }
   }
@@ -355,7 +367,7 @@ export class EmbeddingService {
     
     for (let i = 0; i < nodes.length; i += batchSize) {
       const batch = nodes.slice(i, i + batchSize);
-      this.logger.debug(`Processing embedding batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(nodes.length / batchSize)}`);
+      this.logger.info(`Processing embedding batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(nodes.length / batchSize)}`);
       
       const batchPromises = batch.map(async (node) => {
         const text = this.getTextForNode(node);
@@ -364,6 +376,7 @@ export class EmbeddingService {
         return {
           ...node,
           embedding,
+          sourceText: text,
         } as NodeWithEmbedding;
       });
       
