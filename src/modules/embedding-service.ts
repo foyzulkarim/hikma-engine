@@ -6,6 +6,7 @@ import { BaseNode, NodeWithEmbedding, CodeNode, FileNode, RepositoryNode, Commit
 import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
+import { pipeline, env } from '@xenova/transformers';
 
 export class EmbeddingService {
   private config: ConfigManager;
@@ -27,7 +28,7 @@ export class EmbeddingService {
    * Loads the pre-trained embedding model.
    */
   async loadModel(): Promise<void> {
-    if (this.model) { // Changed from isModelLoaded to model
+    if (this.model) {
       this.logger.debug('Model already loaded, skipping');
       return;
     }
@@ -38,14 +39,28 @@ export class EmbeddingService {
       const aiConfig = this.config.getAIConfig();
       this.logger.info('Loading embedding model', { 
         model: aiConfig.embedding.model,
-        batchSize: aiConfig.embedding.batchSize 
+        batchSize: aiConfig.embedding.batchSize,
+        provider: aiConfig.embedding.provider,
+        endpoint: aiConfig.embedding.localEndpoint
       });
       
-      // Load the transformers pipeline for feature extraction (embeddings)
-      // This part is removed as per edit hint
-      // this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
+      if (aiConfig.embedding.provider === 'local') {
+        // Test connection to LM Studio
+        await this.testLMStudioConnection();
+        this.model = { provider: 'local', endpoint: aiConfig.embedding.localEndpoint };
+      } else if (aiConfig.embedding.provider === 'transformers') {
+        // Configure transformers.js to use local models if needed
+        env.allowRemoteModels = true;
+        env.allowLocalModels = true;
+        
+        // Load the transformers pipeline for feature extraction (embeddings)
+        this.logger.info('Loading transformers.js embedding model', { model: aiConfig.embedding.model });
+        this.model = await pipeline('feature-extraction', aiConfig.embedding.model);
+        this.logger.info('Transformers.js embedding model loaded successfully');
+      } else {
+        throw new Error(`Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers'`);
+      }
       
-      // this.isModelLoaded = true; // Removed as per edit hint
       this.logger.info('Embedding model loaded successfully');
       operation();
     } catch (error) {
@@ -139,9 +154,22 @@ export class EmbeddingService {
    * @returns {Promise<number[]>} The generated embedding vector.
    */
   private async generateEmbedding(text: string): Promise<number[]> {
-    // Simple fallback embedding - hash-based approach
-    const hash = this.simpleHash(text);
-    return Array.from({ length: 384 }, (_, i) => (hash[i % hash.length] / 255) * 2 - 1);
+    const aiConfig = this.config.getAIConfig();
+    
+    if (aiConfig.embedding.provider === 'local' && this.model && typeof this.model === 'object' && 'provider' in this.model) {
+      return await this.generateLMStudioEmbedding(text);
+    } else if (aiConfig.embedding.provider === 'transformers' && this.model && typeof this.model === 'function') {
+      return await this.generateTransformersEmbedding(text);
+    } else {
+      // Simple fallback embedding - hash-based approach
+      this.logger.warn('Using fallback hash-based embedding generation', {
+        provider: aiConfig.embedding.provider,
+        modelType: typeof this.model,
+        modelLoaded: !!this.model
+      });
+      const hash = this.simpleHash(text);
+      return Array.from({ length: 384 }, (_, i) => (hash[i % hash.length] / 255) * 2 - 1);
+    }
   }
 
   private simpleHash(text: string): number[] {
@@ -150,6 +178,169 @@ export class EmbeddingService {
       hash.push(text.charCodeAt(i));
     }
     return hash;
+  }
+
+  /**
+   * Tests connection to LM Studio server.
+   */
+  private async testLMStudioConnection(): Promise<void> {
+    const aiConfig = this.config.getAIConfig();
+    const endpoint = aiConfig.embedding.localEndpoint;
+    
+    if (!endpoint) {
+      throw new Error('LM Studio endpoint not configured');
+    }
+
+    try {
+      this.logger.debug('Testing LM Studio connection', { endpoint });
+      
+      // Test with a simple health check or models endpoint
+      const response = await fetch(`${endpoint}/v1/models`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000), // 5 second timeout
+      });
+
+      if (!response.ok) {
+        throw new Error(`LM Studio server responded with status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Check if any models are loaded
+      if (!result.data || result.data.length === 0) {
+        this.logger.warn('LM Studio server is running but no models are loaded', { endpoint });
+        this.logger.info('Please load an embedding model in LM Studio before proceeding');
+      } else {
+        this.logger.info('LM Studio connection successful', { 
+          endpoint, 
+          modelsLoaded: result.data.length 
+        });
+      }
+    } catch (error) {
+      this.logger.error('Failed to connect to LM Studio', { 
+        endpoint, 
+        error: getErrorMessage(error) 
+      });
+      throw new Error(`Cannot connect to LM Studio at ${endpoint}: ${getErrorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Generates embedding using transformers.js pipeline.
+   * @param {string} text - The text to generate an embedding for.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  private async generateTransformersEmbedding(text: string): Promise<number[]> {
+    try {
+      this.logger.debug('Generating embedding via transformers.js', { 
+        textLength: text.length 
+      });
+
+      // Generate embedding using the loaded pipeline
+      const result = await (this.model as any)(text, {
+        pooling: 'mean',
+        normalize: true,
+      });
+
+      // Extract the embedding vector from the result
+      let embedding: number[];
+      if (result.data) {
+        embedding = Array.from(result.data);
+      } else if (Array.isArray(result)) {
+        embedding = result;
+      } else {
+        throw new Error('Unexpected embedding result format');
+      }
+
+      this.logger.debug('Transformers.js embedding generated successfully', {
+        embeddingLength: embedding.length
+      });
+
+      return embedding;
+    } catch (error) {
+      this.logger.error('Failed to generate embedding via transformers.js', {
+        error: getErrorMessage(error),
+        textLength: text.length
+      });
+      throw new Error(`Transformers.js embedding generation failed: ${getErrorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Generates embedding using LM Studio server.
+   * @param {string} text - The text to generate an embedding for.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  private async generateLMStudioEmbedding(text: string): Promise<number[]> {
+    const aiConfig = this.config.getAIConfig();
+    const endpoint = aiConfig.embedding.localEndpoint;
+    
+    if (!endpoint) {
+      throw new Error('LM Studio endpoint not configured');
+    }
+
+    try {
+      this.logger.debug('Generating embedding via LM Studio', { 
+        endpoint, 
+        textLength: text.length 
+      });
+
+      const response = await fetch(`${endpoint}/v1/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: text,
+          model: aiConfig.embedding.model || 'default',
+        }),
+        signal: AbortSignal.timeout(30000), // 30 second timeout
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error('LM Studio API error', {
+          endpoint,
+          status: response.status,
+          error: errorText
+        });
+        
+        // Provide helpful error message for common issues
+        if (response.status === 404 && errorText.includes('No models loaded')) {
+          throw new Error('No embedding model loaded in LM Studio. Please load an embedding model (e.g., nomic-ai/nomic-embed-text-v1.5) in LM Studio first.');
+        }
+        
+        throw new Error(`LM Studio API error (${response.status}): ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.data || !Array.isArray(result.data) || result.data.length === 0) {
+        throw new Error('Invalid response format from LM Studio');
+      }
+
+      const embedding = result.data[0].embedding;
+      
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw new Error('Invalid embedding format from LM Studio');
+      }
+
+      this.logger.debug('LM Studio embedding generated successfully', {
+        dimensions: embedding.length,
+        textLength: text.length
+      });
+
+      return embedding;
+    } catch (error) {
+      this.logger.error('Failed to generate LM Studio embedding', {
+        endpoint,
+        error: getErrorMessage(error)
+      });
+      throw error;
+    }
   }
 
   /**
@@ -201,7 +392,7 @@ export class EmbeddingService {
       }
 
       // Ensure model is loaded
-      if (!this.model) { // Changed from isModelLoaded to model
+      if (!this.model) {
         await this.loadModel();
       }
 
@@ -246,7 +437,7 @@ export class EmbeddingService {
   async embedQuery(query: string): Promise<number[]> {
     this.logger.debug('Generating embedding for query', { queryLength: query.length });
     
-    if (!this.model) { // Changed from isModelLoaded to model
+    if (!this.model) {
       await this.loadModel();
     }
     
@@ -340,7 +531,7 @@ export class EmbeddingService {
     const dimensions = modelDimensions[modelName] || 384; // Default to 384 if unknown
     
     return {
-      modelLoaded: !!this.model, // Changed from isModelLoaded to model
+      modelLoaded: !!this.model,
       model: modelName,
       dimensions,
     };

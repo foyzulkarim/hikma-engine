@@ -16,6 +16,8 @@ export interface AIConfig {
   embedding: {
     model: string;
     batchSize: number;
+    provider: 'local' | 'transformers';
+    localEndpoint?: string;
   };
   summary: {
     model: string;
@@ -56,6 +58,8 @@ const defaultConfig: AppConfig = {
     embedding: {
       model: 'Xenova/all-MiniLM-L6-v2',
       batchSize: 32,
+      provider: 'transformers',
+      localEndpoint: 'http://localhost:1234',
     },
     summary: {
       model: 'Xenova/distilbart-cnn-6-6',
