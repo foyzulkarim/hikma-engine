@@ -1,5 +1,9 @@
 /**
- * @file Provides search functionality for the hikma-engine knowledge graph.
+ * @file DEPRECATED: Legacy search functionality for the hikma-engine knowledge graph.
+ *       This module is deprecated in favor of EnhancedSearchService.
+ *       Use EnhancedSearchService from enhanced-search-service.ts instead.
+ *       
+ *       @deprecated Use EnhancedSearchService for new implementations
  *       Supports both semantic vector search and metadata-based queries using unified SQLite storage.
  */
 
@@ -58,6 +62,9 @@ export interface EnhancedSearchResult extends SearchResult {
 
 /**
  * Search service for semantic and metadata-based queries.
+ * 
+ * @deprecated This class is deprecated. Use EnhancedSearchService instead.
+ * The EnhancedSearchService provides better performance and more features.
  */
 export class SearchService {
   private embeddingService: EmbeddingService;
