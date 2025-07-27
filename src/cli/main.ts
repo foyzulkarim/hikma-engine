@@ -15,9 +15,20 @@ import { getErrorMessage } from '../utils/error-handling';
 import Table from 'cli-table3';
 
 /**
+ * Display search results in the specified format
+ */
+function displayResults(results: any[], title: string, format: 'table' | 'markdown' = 'table') {
+  if (format === 'markdown') {
+    displayResultsAsMarkdown(results, title);
+  } else {
+    displayResultsAsTable(results, title);
+  }
+}
+
+/**
  * Display search results in a formatted table
  */
-function displayResults(results: any[], title: string) {
+function displayResultsAsTable(results: any[], title: string) {
   console.log(chalk.green(`\n${title}`));
   console.log(chalk.gray('='.repeat(title.length)));
   
@@ -50,6 +61,39 @@ function displayResults(results: any[], title: string) {
   });
 
   console.log(table.toString());
+}
+
+/**
+ * Display search results in markdown format
+ */
+function displayResultsAsMarkdown(results: any[], title: string) {
+  console.log(`# ${title}\n`);
+  console.log(`Found ${results.length} results\n`);
+  
+  if (results.length === 0) {
+    console.log('*No results found.*\n');
+    return;
+  }
+
+  results.forEach((result, index) => {
+    const similarity = result.similarity ? result.similarity.toFixed(4) : 'N/A';
+    const nodeId = result.node?.nodeId || 'N/A';
+    const nodeType = result.node?.nodeType || 'N/A';
+    const filePath = result.node?.filePath || 'N/A';
+    const sourceText = result.node?.sourceText || 'N/A';
+    
+    console.log(`## ${index + 1}. ${nodeType} - ${filePath}\n`);
+    console.log(`**Node ID:** \`${nodeId}\`\n`);
+    console.log(`**Type:** \`${nodeType}\`\n`);
+    console.log(`**File Path:** \`${filePath}\`\n`);
+    console.log(`**Similarity:** ${(parseFloat(similarity) * 100).toFixed(2)}%\n`);
+    console.log(`**Data Source:** embedding_nodes\n`);
+    console.log(`**Source Code:**\n`);
+    console.log('```');
+    console.log(sourceText);
+    console.log('```\n');
+    console.log('---\n');
+  });
 }
 
 /**
@@ -158,6 +202,7 @@ function createProgram(): Command {
     .option('-f, --files <files>', 'Comma-separated list of file paths to search in')
     .option('-e, --include-embedding', 'Include embedding vectors in results', false)
     .option('--json', 'Output results in JSON format', false)
+    .option('--displayFormat <format>', 'Display format: table or markdown', 'table')
     .action(async (query: string, options: any) => {
       try {
         const config = new ConfigManager(process.cwd());
@@ -196,7 +241,8 @@ function createProgram(): Command {
         if (options.json) {
           console.log(JSON.stringify(results, null, 2));
         } else {
-          displayResults(results, 'Semantic Search Results');
+          const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
+          displayResults(results, 'Semantic Search Results', format);
         }
         
         await searchService.disconnect();
@@ -214,6 +260,7 @@ function createProgram(): Command {
     .option('-t, --types <types>', 'Comma-separated list of node types to search')
     .option('-f, --files <files>', 'Comma-separated list of file paths to search in')
     .option('--json', 'Output results in JSON format', false)
+    .option('--displayFormat <format>', 'Display format: table or markdown', 'table')
     .action(async (query: string, options: any) => {
       try {
         const config = new ConfigManager(process.cwd());
@@ -249,7 +296,8 @@ function createProgram(): Command {
         if (options.json) {
           console.log(JSON.stringify(results, null, 2));
         } else {
-          displayResults(results, 'Text Search Results');
+          const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
+          displayResults(results, 'Text Search Results', format);
         }
         
         await searchService.disconnect();
@@ -269,6 +317,7 @@ function createProgram(): Command {
     .option('-f, --file-path <path>', 'File path pattern to search for')
     .option('-x, --extension <ext>', 'File extension to search for')
     .option('--json', 'Output results in JSON format', false)
+    .option('--displayFormat <format>', 'Display format: table or markdown', 'table')
     .action(async (query: string, options: any) => {
       try {
         const config = new ConfigManager(process.cwd());
@@ -303,7 +352,8 @@ function createProgram(): Command {
         if (options.json) {
           console.log(JSON.stringify(results, null, 2));
         } else {
-          displayResults(results, 'Hybrid Search Results');
+          const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
+          displayResults(results, 'Hybrid Search Results', format);
         }
         
         await searchService.disconnect();
