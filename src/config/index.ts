@@ -130,8 +130,9 @@ export class ConfigManager {
     if (process.env.HIKMA_SQLITE_VEC_EXTENSION) {
       config.database.sqlite.vectorExtension = path.resolve(this.projectRoot, process.env.HIKMA_SQLITE_VEC_EXTENSION);
     }
-    if (process.env.HIKMA_LOG_LEVEL) {
-      config.logging.level = process.env.HIKMA_LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error';
+    // Support both HIKMA_LOG_LEVEL (CLI) and HIKMA_API_LOG_LEVEL (API) environment variables
+    if (process.env.HIKMA_LOG_LEVEL || process.env.HIKMA_API_LOG_LEVEL) {
+      config.logging.level = (process.env.HIKMA_LOG_LEVEL || process.env.HIKMA_API_LOG_LEVEL) as 'debug' | 'info' | 'warn' | 'error';
     }
 
     return config;

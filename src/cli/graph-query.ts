@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Load environment variables from .env file
+import 'dotenv/config';
+
 import { SQLiteClient } from '../persistence/db/connection';
 import { InMemoryGraphService } from '../utils/in-memory-graph';
 import { getLogger } from '../utils/logger';

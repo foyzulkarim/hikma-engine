@@ -3,6 +3,9 @@
  *       Initializes configuration, logging, and delegates to the core indexer.
  */
 
+// Load environment variables from .env file
+import 'dotenv/config';
+
 // Add global error handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
