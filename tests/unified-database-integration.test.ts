@@ -6,6 +6,7 @@
 import { Indexer, IndexingOptions } from '../src/core/indexer';
 import { ConfigManager } from '../src/config';
 import { DataLoader } from '../src/modules/data-loader';
+// @deprecated This test uses the deprecated SearchService. Consider updating to use EnhancedSearchService.
 import { SearchService } from '../src/modules/search-service';
 import { SQLiteClient } from '../src/persistence/db-clients';
 import { NodeWithEmbedding, Edge, FileNode, RepositoryNode, CodeNode, CommitNode } from '../src/types';
@@ -536,6 +537,7 @@ function createComprehensiveTestNodes(): NodeWithEmbedding[] {
         startLine: 1,
         endLine: 3,
       },
+      sourceText: 'function calculateSum(a: number, b: number): number { return a + b; }',
       embedding: new Array(384).fill(0.4),
     } as NodeWithEmbedding,
     {
@@ -549,6 +551,7 @@ function createComprehensiveTestNodes(): NodeWithEmbedding[] {
         startLine: 8,
         endLine: 25,
       },
+      sourceText: 'class SQLiteDatabase implements DatabaseConnection { /* implementation */ }',
       embedding: new Array(384).fill(0.5),
     } as NodeWithEmbedding
   ];
@@ -565,6 +568,7 @@ function createComprehensiveTestNodes(): NodeWithEmbedding[] {
         date: new Date('2024-01-15').toISOString(),
         message: 'Add mathematical utility functions for calculations',
       },
+      sourceText: 'Add mathematical utility functions for calculations',
       embedding: new Array(384).fill(0.6),
     } as NodeWithEmbedding,
     {
@@ -576,6 +580,7 @@ function createComprehensiveTestNodes(): NodeWithEmbedding[] {
         date: new Date('2024-01-20').toISOString(),
         message: 'Implement database connection utilities',
       },
+      sourceText: 'Implement database connection utilities',
       embedding: new Array(384).fill(0.7),
     } as NodeWithEmbedding
   ];

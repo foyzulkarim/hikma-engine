@@ -4,13 +4,13 @@ export class GraphNodeDTO extends BaseDTO {
   business_key: string;
   node_type: string;
   properties: string;
-  repo_id?: string;
-  commit_sha?: string;
-  file_path?: string;
-  line?: number;
-  col?: number;
-  signature_hash?: string;
-  labels?: string;
+  repo_id: string | null;
+  commit_sha: string | null;
+  file_path: string | null;
+  line: number | null;
+  col: number | null;
+  signature_hash: string | null;
+  labels: string | null;
 
   constructor(
     id: string,
@@ -23,6 +23,14 @@ export class GraphNodeDTO extends BaseDTO {
     this.business_key = business_key;
     this.node_type = node_type;
     this.properties = properties;
-    Object.assign(this, options);
+    
+    // Always assign all fields to ensure consistent SQL column count
+    this.repo_id = options.repo_id || null;
+    this.commit_sha = options.commit_sha || null;
+    this.file_path = options.file_path || null;
+    this.line = options.line || null;
+    this.col = options.col || null;
+    this.signature_hash = options.signature_hash || null;
+    this.labels = options.labels || null;
   }
 }

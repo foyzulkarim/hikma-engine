@@ -16,6 +16,8 @@ export interface AIConfig {
   embedding: {
     model: string;
     batchSize: number;
+    provider: 'local' | 'transformers';
+    localEndpoint?: string;
   };
   summary: {
     model: string;
@@ -56,6 +58,8 @@ const defaultConfig: AppConfig = {
     embedding: {
       model: 'Xenova/all-MiniLM-L6-v2',
       batchSize: 32,
+      provider: 'transformers',
+      localEndpoint: 'http://localhost:1234',
     },
     summary: {
       model: 'Xenova/distilbart-cnn-6-6',
@@ -73,10 +77,10 @@ const defaultConfig: AppConfig = {
       '**/*.md', '**/*.rst', '**/*.txt',
     ],
     ignorePatterns: [
-      'node_modules/**',
-      'dist/**',
-      'build/**',
-      '.git/**',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/.git/**',
       '**/*.min.js',
       '**/*.min.css',
     ],
@@ -126,8 +130,9 @@ export class ConfigManager {
     if (process.env.HIKMA_SQLITE_VEC_EXTENSION) {
       config.database.sqlite.vectorExtension = path.resolve(this.projectRoot, process.env.HIKMA_SQLITE_VEC_EXTENSION);
     }
-    if (process.env.HIKMA_LOG_LEVEL) {
-      config.logging.level = process.env.HIKMA_LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error';
+    // Support both HIKMA_LOG_LEVEL (CLI) and HIKMA_API_LOG_LEVEL (API) environment variables
+    if (process.env.HIKMA_LOG_LEVEL || process.env.HIKMA_API_LOG_LEVEL) {
+      config.logging.level = (process.env.HIKMA_LOG_LEVEL || process.env.HIKMA_API_LOG_LEVEL) as 'debug' | 'info' | 'warn' | 'error';
     }
 
     return config;

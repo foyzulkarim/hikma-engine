@@ -14,7 +14,12 @@ export class GenericRepository<T extends BaseDTO> implements IRepository<T> {
   async add(dto: T): Promise<T> {
     const columns = Object.keys(dto).join(', ');
     const placeholders = Object.keys(dto).map(() => '?').join(', ');
-    const values = Object.values(dto);
+    const values = Object.values(dto).map(value => {
+      if (value === undefined) return null;
+      if (typeof value === 'boolean') return value ? 1 : 0;
+      if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+      return value;
+    });
     const sql = `INSERT OR REPLACE INTO ${this.tableName} (${columns}) VALUES (${placeholders})`;
     this.db.prepare(sql).run(...values);
     return dto;
@@ -61,7 +66,27 @@ export class GenericRepository<T extends BaseDTO> implements IRepository<T> {
     const stmt = this.db.prepare(sql);
     const insertMany = this.db.transaction((items: T[]) => {
       for (const item of items) {
-        stmt.run(...Object.values(item));
+        // Convert undefined values to null for SQLite compatibility
+        const values = Object.values(item).map((value, index) => {
+          if (value === undefined) return null;
+          if (typeof value === 'boolean') return value ? 1 : 0; // Convert boolean to integer
+          if (typeof value === 'object' && value !== null) {
+            console.error('Attempting to bind object to SQLite:', value, 'in table:', this.tableName);
+            return JSON.stringify(value);
+          }
+          // Check for other problematic types
+          if (typeof value === 'function') {
+            console.error('Attempting to bind function to SQLite:', value, 'in table:', this.tableName);
+            return null;
+          }
+          if (typeof value === 'symbol') {
+            console.error('Attempting to bind symbol to SQLite:', value, 'in table:', this.tableName);
+            return null;
+          }
+          return value;
+        });
+        
+        stmt.run(...values);
       }
     });
     

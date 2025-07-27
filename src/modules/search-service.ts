@@ -1,5 +1,9 @@
 /**
- * @file Provides search functionality for the hikma-engine knowledge graph.
+ * @file DEPRECATED: Legacy search functionality for the hikma-engine knowledge graph.
+ *       This module is deprecated in favor of EnhancedSearchService.
+ *       Use EnhancedSearchService from enhanced-search-service.ts instead.
+ *       
+ *       @deprecated Use EnhancedSearchService for new implementations
  *       Supports both semantic vector search and metadata-based queries using unified SQLite storage.
  */
 
@@ -58,6 +62,9 @@ export interface EnhancedSearchResult extends SearchResult {
 
 /**
  * Search service for semantic and metadata-based queries.
+ * 
+ * @deprecated This class is deprecated. Use EnhancedSearchService instead.
+ * The EnhancedSearchService provides better performance and more features.
  */
 export class SearchService {
   private embeddingService: EmbeddingService;
@@ -258,7 +265,8 @@ export class SearchService {
         id: result.id,
         type: nodeType as NodeType,
         properties: result.data,
-        embedding: [] // Don't return embedding in search results
+        embedding: [], // Don't return embedding in search results
+        sourceText: ''
       },
       similarity: result.similarity,
       rank: 0 // Will be set when sorting
@@ -610,7 +618,8 @@ export class SearchService {
             startLine: row.start_line,
             endLine: row.end_line
           },
-          embedding: [] // Empty embedding for text search results
+          embedding: [], // Empty embedding for text search results
+          sourceText: row.source_text || ''
         } as NodeWithEmbedding,
         similarity: 1.0, // Perfect match for text search
         rank: index + 1
@@ -797,7 +806,8 @@ export class SearchService {
               startLine: result.start_line,
               endLine: result.end_line
             },
-            embedding: []
+            embedding: [],
+            sourceText: result.source_text || ''
           };
         }
         
@@ -814,7 +824,8 @@ export class SearchService {
                 fileName: result.file_name,
                 fileExtension: result.file_extension
               },
-              embedding: []
+              embedding: [],
+              sourceText: ''
             };
           }
         }
@@ -833,7 +844,8 @@ export class SearchService {
                 date: result.date,
                 hash: result.hash
               },
-              embedding: []
+              embedding: [],
+              sourceText: result.message || ''
             };
           }
         }
@@ -896,7 +908,8 @@ export class SearchService {
             language: row.language,
             lastModified: row.last_modified
           },
-          embedding: [] // Empty embedding for file search results
+          embedding: [], // Empty embedding for file search results
+          sourceText: ''
         } as NodeWithEmbedding,
         similarity: 0.9, // High similarity for name matches
         rank: index + 1

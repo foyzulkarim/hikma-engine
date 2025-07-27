@@ -4,6 +4,8 @@ import {
   FileModel,
   PhaseStatusModel,
   GraphNodeModel,
+  GraphEdgeModel,
+  EmbeddingNodeModel,
 } from '../models';
 import { generateCreateTableCommand, generateIndexes } from '../utils/schema-generator';
 
@@ -15,6 +17,8 @@ export function initializeTables(client: SQLiteClient): void {
   db.exec(generateCreateTableCommand(new FileModel(new (class extends Object {})() as any)));
   db.exec(generateCreateTableCommand(new PhaseStatusModel(new (class extends Object {})() as any)));
   db.exec(generateCreateTableCommand(new GraphNodeModel(new (class extends Object {})() as any)));
+  db.exec(generateCreateTableCommand(new GraphEdgeModel(new (class extends Object {})() as any)));
+  db.exec(generateCreateTableCommand(new EmbeddingNodeModel(new (class extends Object {})() as any)));
   
   // Create indexes for performance
   const repositoryIndexes = generateIndexes('repositories', {
@@ -42,7 +46,18 @@ export function initializeTables(client: SQLiteClient): void {
     'status': ['status']
   });
   
-  [...repositoryIndexes, ...fileIndexes, ...graphNodeIndexes, ...phaseIndexes].forEach(indexSql => {
+  const graphEdgeIndexes = generateIndexes('graph_edges', {
+    'source_target': ['source_id', 'target_id'],
+    'edge_type': ['edge_type'],
+    'source_business_key': ['source_business_key'],
+    'target_business_key': ['target_business_key']
+  });
+  
+  const embeddingNodeIndexes = generateIndexes('embedding_nodes', {
+    'node_id': ['node_id']
+  });
+  
+  [...repositoryIndexes, ...fileIndexes, ...graphNodeIndexes, ...phaseIndexes, ...graphEdgeIndexes, ...embeddingNodeIndexes].forEach(indexSql => {
     db.exec(indexSql);
   });
 }

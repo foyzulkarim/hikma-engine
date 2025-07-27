@@ -34,6 +34,7 @@ export interface PhaseResult {
   duration: number;
   itemsProcessed: number;
   fromCache: boolean;
+  data?: any;
 }
 
 export interface IndexingResult {
@@ -133,9 +134,14 @@ export class PhaseManager {
         if (phaseNum === 3) phase3Data = phaseResult.data;
       }
 
+      // Calculate totals from the final phase data
+      const finalPhaseData = phases.find(p => p.phase === 4)?.data;
+      const totalNodes = finalPhaseData?.finalNodes?.length || 0;
+      const totalEdges = finalPhaseData?.finalEdges?.length || 0;
+
       return {
-        totalNodes: 0, // TODO: Calculate from phase data
-        totalEdges: 0, // TODO: Calculate from phase data
+        totalNodes,
+        totalEdges,
         processedFiles: phase1Data?.files?.length || 0,
         isIncremental: indexingStrategy.isIncremental,
         duration: Date.now() - startTime,
@@ -319,17 +325,89 @@ export class PhaseManager {
 
     const nodesWithSummaries = await summaryExtractor.extract(nodesToSummarize);
 
+    // Sanitize the result to avoid circular references in logging
+    const sanitizedSummaries = nodesWithSummaries.map(node => {
+      if (node.type === 'FunctionNode') {
+        // Remove potentially circular reference arrays for logging
+        const { callsMethods, calledByMethods, internalCallGraph, ...safeProperties } = node.properties;
+        return {
+          ...node,
+          properties: {
+            ...safeProperties,
+            callsMethodsCount: callsMethods?.length || 0,
+            calledByMethodsCount: calledByMethods?.length || 0,
+            internalCallGraphCount: internalCallGraph?.length || 0
+          }
+        };
+      }
+      return node;
+    });
+
     return {
-      summaries: nodesWithSummaries,
+      summaries: sanitizedSummaries,
+      summariesCount: nodesWithSummaries.length
     };
   }
 
   private async executePhase4(context: any): Promise<any> {
     // Phase 4: Final Assembly and Vector Embeddings
-    // TODO: Implement final assembly logic
+    // Aggregate all nodes and edges from previous phases
+    const allNodes = [];
+    const allEdges = [];
+
+
+    // Add AST nodes and edges from phase 2
+    if (context.phase2Data?.astNodes) {
+      allNodes.push(...context.phase2Data.astNodes);
+    }
+    if (context.phase2Data?.astEdges) {
+      allEdges.push(...context.phase2Data.astEdges);
+    }
+
+    // Add enriched nodes from phase 3 (summaries)
+    if (context.phase3Data?.summaries) {
+      // Replace or merge with existing nodes that have summaries
+      const summaryMap = new Map();
+      context.phase3Data.summaries.forEach((node: any) => {
+        summaryMap.set(node.id, node);
+      });
+
+      // Update existing nodes with summaries or add new ones
+      for (let i = 0; i < allNodes.length; i++) {
+        const existingNode: any = allNodes[i];
+        if (summaryMap.has(existingNode.id)) {
+          allNodes[i] = summaryMap.get(existingNode.id);
+          summaryMap.delete(existingNode.id);
+        }
+      }
+    }
+
+    // Phase 4 Part 2: Vector Embeddings
+    if (context.options.skipEmbeddings) {
+      this.logger.info('Skipping vector embedding generation.');
+      return {
+        finalNodes: allNodes,
+        finalEdges: allEdges,
+      };
+    }
+
+    this.logger.info('Starting vector embedding generation...');
+
+    // types of the nodes for logging purpose
+    const tempNodes = allNodes.filter((node) => node.type === undefined);
+    this.logger.info(`filtered nodes: ${tempNodes.length}`, tempNodes);
+
+    const embeddingExtractor = new EmbeddingExtractor(this.config);
+    const nodesWithEmbeddings = await embeddingExtractor.extract(allNodes);
+
+    this.logger.info(`Phase 4 final assembly and embedding completed`, {
+      totalNodes: nodesWithEmbeddings.length,
+      totalEdges: allEdges.length
+    });
+
     return {
-      finalNodes: [],
-      finalEdges: [],
+      finalNodes: nodesWithEmbeddings,
+      finalEdges: allEdges,
     };
   }
 
@@ -345,10 +423,18 @@ export class PhaseManager {
       case 2:
         await this.phaseRepo.persistPhase2Data({
           repoId,
-          astNodes: data.astNodes || []
+          astNodes: data.astNodes || [],
+          astEdges: data.astEdges || []
         });
         break;
-      // TODO: Add other phases
+      case 4:
+        await this.phaseRepo.persistPhase4Data({
+          repoId,
+          finalNodes: data.finalNodes || [],
+          finalEdges: data.finalEdges || []
+        });
+        break;
+      // TODO: Add phase 3
     }
   }
 
@@ -418,7 +504,7 @@ export class PhaseManager {
       // Create repository record
       const nodeCreator = new NodeCreator();
       const repoNode = nodeCreator.createRepositoryNode(this.projectRoot);
-      
+
       const repositoryDTO = new RepositoryDTO(
         repoId, // Use consistent repo ID
         repoNode.properties.repoPath,
@@ -433,8 +519,8 @@ export class PhaseManager {
 
       this.logger.debug('Repository record created', { repoId, repoPath: repositoryDTO.repo_path });
     } catch (error) {
-      this.logger.warn('Failed to ensure repository exists, will create during Phase 1', { 
-        error: (error as Error).message 
+      this.logger.warn('Failed to ensure repository exists, will create during Phase 1', {
+        error: (error as Error).message
       });
       // Don't throw - Phase 1 will handle repository creation
     }

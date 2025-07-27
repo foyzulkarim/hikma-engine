@@ -1,28 +1,22 @@
 #!/usr/bin/env node
 
 /**
- * @file DEPRECATED: Legacy CLI command for searching the hikma-engine knowledge graph.
+ * @file DEPRECATED: Legacy enhanced search CLI for the hikma-engine.
  *       This CLI is deprecated in favor of the unified CLI in main.ts.
- *       Use 'npm run hikma search' instead of 'npm run search'.
+ *       Use 'npm run hikma search' instead of 'npm run enhanced-search'.
  *       
  *       @deprecated Use the unified CLI: npm run hikma search <subcommand>
- *       Provides semantic search, metadata filtering, and specialized search commands.
  */
 
 // DEPRECATED: This entire file is commented out. Use 'npm run hikma search' instead.
-// The old search functionality has been replaced by the unified CLI in main.ts
+// The enhanced search functionality has been integrated into the unified CLI in main.ts
 
 /*
 // All code below is commented out - use 'npm run hikma search' instead
 
 import { Command } from 'commander';
 import { ConfigManager } from '../config';
-import { SearchService, SearchOptions, MetadataFilters } from '../modules/search-service';
-import { getLogger } from '../utils/logger';
-import { getErrorMessage } from '../utils/error-handling';
-import chalk from 'chalk';
-import Table from 'cli-table3';
-
+import { EnhancedSearchService } from '../modules/enhanced-search-service';
 // ... rest of the original file content is commented out ...
 // Use the new unified CLI: npm run hikma search
 

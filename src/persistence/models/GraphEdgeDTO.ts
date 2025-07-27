@@ -26,6 +26,11 @@ export class GraphEdgeDTO extends BaseDTO {
     this.source_business_key = source_business_key;
     this.target_business_key = target_business_key;
     this.edge_type = edge_type;
-    Object.assign(this, options);
+    
+    // Manually assign only defined values to avoid undefined properties
+    if (options.properties !== undefined) this.properties = options.properties;
+    if (options.line !== undefined) this.line = options.line;
+    if (options.col !== undefined) this.col = options.col;
+    if (options.dynamic !== undefined) this.dynamic = options.dynamic;
   }
 }

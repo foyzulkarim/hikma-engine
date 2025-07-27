@@ -3,6 +3,9 @@
  *       Initializes configuration, logging, and delegates to the core indexer.
  */
 
+// Load environment variables from .env file
+import 'dotenv/config';
+
 // Add global error handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -168,7 +171,11 @@ Examples:
       console.log('✓ Indexing completed');
 
       // Log results
-      logger.info('Indexing completed successfully', result);
+      const resultForLogging = {
+        ...result,
+        phases: result.phases.map(({ data, ...phase }) => phase),
+      };
+      logger.info('Indexing completed successfully', resultForLogging);
       
       console.log('\n=== Indexing Results ===');
       console.log(`Project: ${this.projectRoot}`);

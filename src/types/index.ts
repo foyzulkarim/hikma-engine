@@ -202,6 +202,7 @@ export interface Edge {
  */
 export interface NodeWithEmbedding extends BaseNode {
   embedding: number[];
+  sourceText: string;
 }
 
 
