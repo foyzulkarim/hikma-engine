@@ -7,8 +7,6 @@
     "start": "ts-node src/index.ts",
     "api": "ts-node src/api/index.ts",
     "api:dev": "ts-node src/api/index.ts",
-    "search": "echo 'DEPRECATED: Use npm run hikma search instead' && ts-node src/cli/search.ts",
-    "enhanced-search": "echo 'DEPRECATED: Use npm run hikma search instead' && ts-node src/cli/enhanced-search.ts",
     "hikma": "ts-node src/cli/main.ts",
     "graph-query": "ts-node src/cli/graph-query.ts",
     "build": "tsc",
