@@ -18,6 +18,7 @@ import {
   EmbeddingSearchOptions,
   EmbeddingMetadataFilters,
 } from '../modules/enhanced-search-service';
+import { AnswerSynthesizer } from '../modules/answer-synthesizer';
 import { ConfigManager } from '../config';
 import { initializeLogger, getLogger } from '../utils/logger';
 import { getErrorMessage, normalizeError } from '../utils/error-handling';
@@ -138,6 +139,16 @@ function displayResults(
   } else {
     console.log(chalk.green(`\n📊 Displayed ${resultCount} result${resultCount === 1 ? '' : 's'}`));
   }
+}
+
+/**
+ * Display synthesized answer
+ */
+function displayAnswer(answer: string) {
+  console.log(chalk.green('\n🤖 Answer:'));
+  console.log(chalk.gray('='.repeat(50)));
+  console.log(chalk.white(answer));
+  console.log(chalk.gray('='.repeat(50)));
 }
 
 /**
@@ -401,6 +412,11 @@ function createProgram(): Command {
       'Display format: table or markdown',
       'table'
     )
+    .option(
+      '-a, --answer',
+      'Synthesize results into a coherent answer',
+      false
+    )
     .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
@@ -482,7 +498,14 @@ function createProgram(): Command {
         try {
           const results = await searchService.semanticSearch(query, searchOptions);
 
-          if (options.json) {
+          // If answer synthesis is requested
+          if (options.answer) {
+            displayProgress('Synthesizing answer from results...');
+            const answerSynthesizer = new AnswerSynthesizer(config);
+            console.log('results', results);
+            const answer = await answerSynthesizer.synthesizeAnswer(query, results);
+            displayAnswer(answer);
+          } else if (options.json) {
             console.log(JSON.stringify(results, null, 2));
           } else {
             const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
@@ -823,6 +846,122 @@ function createProgram(): Command {
         }
       } catch (error) {
         handleCLIError(error, 'Stats command failed');
+      }
+    });
+
+  // Answer command
+  const answerCmd = program
+    .command('answer <query> [project-path]')
+    .description('Synthesize search results into a coherent answer\n\nPerforms semantic search and then synthesizes the results into a coherent answer using local LLM.')
+    .option('-l, --limit <number>', 'Maximum number of results to consider', '10')
+    .option(
+      '-s, --similarity <number>',
+      'Minimum similarity threshold (0-1)',
+      '0.1'
+    )
+    .option(
+      '-t, --types <types>',
+      'Comma-separated list of node types to search'
+    )
+    .option(
+      '-f, --files <files>',
+      'Comma-separated list of file paths to search in'
+    )
+    .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
+      try {
+        // Validate query
+        if (!query || query.trim().length === 0) {
+          throw new ValidationError('Search query cannot be empty', 'answer synthesis');
+        }
+
+        // Validate numeric options
+        const limit = parseInt(options.limit);
+        if (isNaN(limit) || limit < 1 || limit > 1000) {
+          throw new ValidationError('Limit must be a number between 1 and 1000', 'answer synthesis');
+        }
+
+        const similarity = parseFloat(options.similarity);
+        if (isNaN(similarity) || similarity < 0 || similarity > 1) {
+          throw new ValidationError('Similarity threshold must be a number between 0 and 1', 'answer synthesis');
+        }
+
+        // Validate and resolve project path
+        const resolvedPath = path.resolve(projectPath);
+        if (!fs.existsSync(resolvedPath)) {
+          throw new ValidationError(`Project path does not exist: ${resolvedPath}`, 'answer synthesis');
+        }
+
+        let config: ConfigManager;
+        try {
+          config = new ConfigManager(resolvedPath);
+
+          // Initialize logging
+          const loggingConfig = config.getLoggingConfig();
+          initializeLogger({
+            level: loggingConfig.level,
+            enableConsole: loggingConfig.enableConsole,
+            enableFile: loggingConfig.enableFile,
+            logFilePath: loggingConfig.logFilePath,
+          });
+        } catch (error) {
+          throw new ConfigurationError(`Failed to initialize configuration: ${getErrorMessage(error)}`, 'answer synthesis');
+        }
+
+        const searchService = new EnhancedSearchService(config);
+        const answerSynthesizer = new AnswerSynthesizer(config);
+
+        displayCommandHeader('Answer Synthesis', `Answering: "${query}" in ${resolvedPath}`);
+        displayProgress('Initializing services...');
+        
+        try {
+          await searchService.initialize();
+          await answerSynthesizer.loadModel();
+        } catch (error) {
+          throw new ProcessingError(`Failed to initialize services: ${getErrorMessage(error)}`, 'answer synthesis');
+        }
+
+        const searchOptions: EmbeddingSearchOptions = {
+          limit,
+          minSimilarity: similarity,
+        };
+
+        if (options.types) {
+          searchOptions.nodeTypes = options.types
+            .split(',')
+            .map((t: string) => t.trim())
+            .filter((t: string) => t.length > 0);
+        }
+
+        if (options.files) {
+          searchOptions.filePaths = options.files
+            .split(',')
+            .map((f: string) => f.trim())
+            .filter((f: string) => f.length > 0);
+        }
+
+        displayProgress('Performing semantic search...');
+        let results;
+        try {
+          results = await searchService.semanticSearch(query, searchOptions);
+        } catch (error) {
+          throw new ProcessingError(`Search operation failed: ${getErrorMessage(error)}`, 'answer synthesis');
+        }
+
+        displayProgress('Synthesizing answer from results...');
+        try {
+          const answer = await answerSynthesizer.synthesizeAnswer(query, results);
+          displayAnswer(answer);
+        } catch (error) {
+          throw new ProcessingError(`Answer synthesis failed: ${getErrorMessage(error)}`, 'answer synthesis');
+        } finally {
+          try {
+            await searchService.disconnect();
+          } catch (error) {
+            console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
+          }
+        }
+      } catch (error) {
+        handleCLIError(error, 'Answer synthesis failed');
       }
     });
 
