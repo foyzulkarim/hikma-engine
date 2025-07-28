@@ -242,7 +242,7 @@ function createProgram(): Command {
 
   program
     .name('hikma')
-    .description('Hikma Engine - Code Knowledge Graph and Search\n\nUnified CLI for indexing codebases and performing semantic, text, and hybrid searches.')
+    .description('Hikma Engine - Code Knowledge Graph and Search\n\nUnified CLI for indexing codebases and performing semantic, text, and hybrid searches.\nSupports multi-repository workflows with directory-specific indexing and searching.')
     .version('2.0.0');
 
   // Index command
@@ -374,8 +374,8 @@ function createProgram(): Command {
 
   // Semantic search subcommand
   searchCmd
-    .command('semantic <query>')
-    .description('Perform semantic search using vector embeddings\n\nExample: hikma search semantic "authentication logic"')
+    .command('semantic <query> [project-path]')
+    .description('Perform semantic search using vector embeddings\n\nExample: hikma search semantic "authentication logic"\nExample: hikma search semantic "authentication logic" /path/to/project')
     .option('-l, --limit <number>', 'Maximum number of results', '10')
     .option(
       '-s, --similarity <number>',
@@ -401,7 +401,7 @@ function createProgram(): Command {
       'Display format: table or markdown',
       'table'
     )
-    .action(async (query: string, options: any) => {
+    .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
         if (!query || query.trim().length === 0) {
@@ -424,8 +424,15 @@ function createProgram(): Command {
           throw new ValidationError('Display format must be either "table" or "markdown"', 'semantic search');
         }
 
+        // Validate and resolve project path
+        const resolvedPath = path.resolve(projectPath);
+        if (!fs.existsSync(resolvedPath)) {
+          throw new ValidationError(`Project path does not exist: ${resolvedPath}`, 'semantic search');
+        }
+
+        let config: ConfigManager;
         try {
-          const config = new ConfigManager(process.cwd());
+          config = new ConfigManager(resolvedPath);
 
           // Initialize logging
           const loggingConfig = config.getLoggingConfig();
@@ -439,9 +446,9 @@ function createProgram(): Command {
           throw new ConfigurationError(`Failed to initialize configuration: ${getErrorMessage(error)}`, 'semantic search');
         }
 
-        const searchService = new EnhancedSearchService(new ConfigManager(process.cwd()));
+        const searchService = new EnhancedSearchService(config);
 
-        displayCommandHeader('Semantic Search', `Searching for: "${query}"`);
+        displayCommandHeader('Semantic Search', `Searching for: "${query}" in ${resolvedPath}`);
         displayProgress('Initializing enhanced search service...');
         
         try {
@@ -499,8 +506,8 @@ function createProgram(): Command {
 
   // Text search subcommand
   searchCmd
-    .command('text <query>')
-    .description('Perform text-based search in source_text field\n\nExample: hikma search text "function authenticate"')
+    .command('text <query> [project-path]')
+    .description('Perform text-based search in source_text field\n\nExample: hikma search text "function authenticate"\nExample: hikma search text "function authenticate" /path/to/project')
     .option('-l, --limit <number>', 'Maximum number of results', '10')
     .option(
       '-t, --types <types>',
@@ -516,7 +523,7 @@ function createProgram(): Command {
       'Display format: table or markdown',
       'table'
     )
-    .action(async (query: string, options: any) => {
+    .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
         if (!query || query.trim().length === 0) {
@@ -534,8 +541,15 @@ function createProgram(): Command {
           throw new ValidationError('Display format must be either "table" or "markdown"', 'text search');
         }
 
+        // Validate and resolve project path
+        const resolvedPath = path.resolve(projectPath);
+        if (!fs.existsSync(resolvedPath)) {
+          throw new ValidationError(`Project path does not exist: ${resolvedPath}`, 'text search');
+        }
+
+        let config: ConfigManager;
         try {
-          const config = new ConfigManager(process.cwd());
+          config = new ConfigManager(resolvedPath);
 
           const loggingConfig = config.getLoggingConfig();
           initializeLogger({
@@ -548,9 +562,9 @@ function createProgram(): Command {
           throw new ConfigurationError(`Failed to initialize configuration: ${getErrorMessage(error)}`, 'text search');
         }
 
-        const searchService = new EnhancedSearchService(new ConfigManager(process.cwd()));
+        const searchService = new EnhancedSearchService(config);
 
-        displayCommandHeader('Text Search', `Searching for: "${query}"`);
+        displayCommandHeader('Text Search', `Searching for: "${query}" in ${resolvedPath}`);
         displayProgress('Initializing enhanced search service...');
         
         try {
@@ -606,9 +620,9 @@ function createProgram(): Command {
 
   // Hybrid search subcommand
   searchCmd
-    .command('hybrid <query>')
+    .command('hybrid <query> [project-path]')
     .description(
-      'Perform hybrid search combining semantic and metadata filters\n\nExample: hikma search hybrid "user validation" --type function --extension .ts'
+      'Perform hybrid search combining semantic and metadata filters\n\nExample: hikma search hybrid "user validation" --type function --extension .ts\nExample: hikma search hybrid "user validation" /path/to/project --type function'
     )
     .option('-l, --limit <number>', 'Maximum number of results', '20')
     .option(
@@ -625,7 +639,7 @@ function createProgram(): Command {
       'Display format: table or markdown',
       'table'
     )
-    .action(async (query: string, options: any) => {
+    .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
         if (!query || query.trim().length === 0) {
@@ -648,8 +662,15 @@ function createProgram(): Command {
           throw new ValidationError('Display format must be either "table" or "markdown"', 'hybrid search');
         }
 
+        // Validate and resolve project path
+        const resolvedPath = path.resolve(projectPath);
+        if (!fs.existsSync(resolvedPath)) {
+          throw new ValidationError(`Project path does not exist: ${resolvedPath}`, 'hybrid search');
+        }
+
+        let config: ConfigManager;
         try {
-          const config = new ConfigManager(process.cwd());
+          config = new ConfigManager(resolvedPath);
 
           const loggingConfig = config.getLoggingConfig();
           initializeLogger({
@@ -662,9 +683,9 @@ function createProgram(): Command {
           throw new ConfigurationError(`Failed to initialize configuration: ${getErrorMessage(error)}`, 'hybrid search');
         }
 
-        const searchService = new EnhancedSearchService(new ConfigManager(process.cwd()));
+        const searchService = new EnhancedSearchService(config);
 
-        displayCommandHeader('Hybrid Search', `Searching for: "${query}"`);
+        displayCommandHeader('Hybrid Search', `Searching for: "${query}" in ${resolvedPath}`);
         displayProgress('Initializing enhanced search service...');
         
         try {
@@ -713,13 +734,20 @@ function createProgram(): Command {
 
   // Stats subcommand
   searchCmd
-    .command('stats')
-    .description('Display embedding statistics\n\nShows total nodes, embedding coverage, and breakdowns by type and file path.')
+    .command('stats [project-path]')
+    .description('Display embedding statistics\n\nShows total nodes, embedding coverage, and breakdowns by type and file path.\nExample: hikma search stats\nExample: hikma search stats /path/to/project')
     .option('--json', 'Output results in JSON format', false)
-    .action(async (options: any) => {
+    .action(async (projectPath: string = process.cwd(), options: any) => {
       try {
+        // Validate and resolve project path
+        const resolvedPath = path.resolve(projectPath);
+        if (!fs.existsSync(resolvedPath)) {
+          throw new ValidationError(`Project path does not exist: ${resolvedPath}`, 'stats command');
+        }
+
+        let config: ConfigManager;
         try {
-          const config = new ConfigManager(process.cwd());
+          config = new ConfigManager(resolvedPath);
 
           const loggingConfig = config.getLoggingConfig();
           initializeLogger({
@@ -732,9 +760,9 @@ function createProgram(): Command {
           throw new ConfigurationError(`Failed to initialize configuration: ${getErrorMessage(error)}`, 'stats command');
         }
 
-        const searchService = new EnhancedSearchService(new ConfigManager(process.cwd()));
+        const searchService = new EnhancedSearchService(config);
 
-        displayCommandHeader('Embedding Statistics', 'Retrieving comprehensive statistics about indexed embeddings');
+        displayCommandHeader('Embedding Statistics', `Retrieving comprehensive statistics about indexed embeddings in ${resolvedPath}`);
         displayProgress('Initializing enhanced search service...');
         
         try {
