@@ -56,14 +56,14 @@ const defaultConfig: AppConfig = {
   },
   ai: {
     embedding: {
-      model: 'Xenova/all-MiniLM-L6-v2',
+      model: 'jinaai/jina-embeddings-v2-base-code',
       batchSize: 32,
       provider: 'transformers',
       localEndpoint: 'http://localhost:1234',
     },
     summary: {
-      model: 'Xenova/distilbart-cnn-6-6',
-      maxTokens: 150,
+      model: 'Xenova/distilgpt2',
+      maxTokens: 256,
     },
   },
   indexing: {
