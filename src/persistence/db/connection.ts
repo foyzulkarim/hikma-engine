@@ -262,7 +262,7 @@ export class SQLiteClient {
   public getLastIndexedCommit(): string | null {
     try {
       const result = this.get(
-        'SELECT value FROM indexing_state WHERE key = ?',
+        'SELECT value FROM indexing_state WHERE state_key = ?',
         ['last_indexed_commit']
       );
       return result?.value || null;
@@ -275,7 +275,7 @@ export class SQLiteClient {
   public setLastIndexedCommit(commitHash: string): void {
     try {
       this.run(
-        `INSERT OR REPLACE INTO indexing_state (id, key, value, updated_at) 
+        `INSERT OR REPLACE INTO indexing_state (id, state_key, value, updated_at) 
          VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
         [`last_indexed_commit`, 'last_indexed_commit', commitHash]
       );

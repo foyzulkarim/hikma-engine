@@ -1,425 +1,755 @@
-// /**
-//  * @file Unit tests for DataLoader with unified SQLite storage
-//  */
+/**
+ * @file Unit tests for DataLoader with comprehensive coverage of data loading and persistence coordination
+ */
 
-// import { DataLoader } from './data-loader';
-// import { ConfigManager } from '../config';
-// import { NodeWithEmbedding, FileNode, CodeNode, CommitNode, Edge } from '../types';
-// import * as fs from 'fs';
-// import * as path from 'path';
-// import * as os from 'os';
+import { DataLoader } from './data-loader';
+import { ConfigManager } from '../config';
+import { NodeWithEmbedding, FileNode, CodeNode, CommitNode, Edge, RepositoryNode, FunctionNode, TestNode, PullRequestNode } from '../types';
+import { MockSQLiteClient } from '../../tests/utils/mocks/MockSQLiteClient';
+import { TestDataFactory } from '../../tests/utils/TestDataFactory';
+import { 
+  DatabaseConnectionError, 
+  DatabaseOperationError, 
+  DataValidationError,
+  withRetry 
+} from '../utils/error-handling';
+import * as path from 'path';
+import * as os from 'os';
 
-// describe('DataLoader', () => {
-//   let dataLoader: DataLoader;
-//   let testDbPath: string;
-//   let config: ConfigManager;
+// Mock the SQLiteClient
+jest.mock('../persistence/db/connection', () => ({
+  SQLiteClient: jest.fn().mockImplementation((dbPath: string) => {
+    return new MockSQLiteClient(dbPath);
+  })
+}));
 
-//   beforeAll(async () => {
-//     // Create temporary database file for testing
-//     const tempDir = os.tmpdir();
-//     testDbPath = path.join(tempDir, `test-dataloader-${Date.now()}.db`);
+// Mock the withRetry function
+jest.mock('../utils/error-handling', () => ({
+  ...jest.requireActual('../utils/error-handling'),
+  withRetry: jest.fn()
+}));
+
+describe('DataLoader', () => {
+  let dataLoader: DataLoader;
+  let mockSQLiteClient: MockSQLiteClient;
+  let testDbPath: string;
+  let config: ConfigManager;
+  let mockWithRetry: jest.MockedFunction<typeof withRetry>;
+
+  beforeAll(() => {
+    // Create temporary database path for testing
+    const tempDir = os.tmpdir();
+    testDbPath = path.join(tempDir, `test-dataloader-${Date.now()}.db`);
     
-//     // Initialize config manager
-//     config = new ConfigManager(process.cwd());
-//   });
-
-//   beforeEach(async () => {
-//     // Create fresh DataLoader instance for each test
-//     dataLoader = new DataLoader(testDbPath, config);
-//   });
-
-//   afterEach(async () => {
-//     // Clean up after each test
-//     try {
-//       await dataLoader.disconnect();
-//     } catch (error) {
-//       // Ignore disconnect errors in tests
-//     }
+    // Initialize config manager
+    config = new ConfigManager(process.cwd());
     
-//     // Remove test database file
-//     if (fs.existsSync(testDbPath)) {
-//       fs.unlinkSync(testDbPath);
-//     }
-//   });
+    // Setup withRetry mock
+    mockWithRetry = withRetry as jest.MockedFunction<typeof withRetry>;
+  });
 
-//   describe('Initialization and Connection', () => {
-//     it('should initialize DataLoader with SQLite path and config', () => {
-//       expect(dataLoader).toBeDefined();
-//     });
+  beforeEach(() => {
+    // Reset test data factory counter
+    TestDataFactory.resetCounter();
+    
+    // Create fresh DataLoader instance for each test
+    dataLoader = new DataLoader(testDbPath, config);
+    
+    // Get the mock SQLite client instance
+    mockSQLiteClient = (dataLoader as any).sqliteClient as MockSQLiteClient;
+    
+    // Setup default withRetry behavior
+    mockWithRetry.mockImplementation(async (fn, config, logger, operation) => {
+      return await fn();
+    });
+    
+    // Clear all mocks
+    mockSQLiteClient.clearMocks();
+  });
 
-//     it('should connect to SQLite database only', async () => {
-//       const stats = await dataLoader.getStats();
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('Initialization and Configuration', () => {
+    it('should initialize DataLoader with SQLite path and config', () => {
+      expect(dataLoader).toBeDefined();
+      expect(mockSQLiteClient).toBeDefined();
+    });
+
+    it('should initialize with correct database path', () => {
+      const customPath = '/custom/path/test.db';
+      const customLoader = new DataLoader(customPath, config);
       
-//       expect(stats).toHaveProperty('databases');
-//       expect(stats).toHaveProperty('connectivity');
-//       expect(stats.databases).toHaveProperty('sqlite');
-//       expect(stats.connectivity).toHaveProperty('sqlite');
+      expect(customLoader).toBeDefined();
+    });
+
+    it('should store configuration manager reference', () => {
+      expect((dataLoader as any).config).toBe(config);
+    });
+  });
+
+  describe('Database Connection Management', () => {
+    it('should connect to SQLite database successfully', async () => {
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      expect(mockSQLiteClient.connect).toHaveBeenCalled();
+    });
+
+    it('should handle connection failures with retry logic', async () => {
+      mockSQLiteClient.simulateConnectionFailure(true);
+      mockWithRetry.mockRejectedValueOnce(new DatabaseConnectionError('SQLite', 'Connection failed'));
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow(DatabaseConnectionError);
+      expect(mockWithRetry).toHaveBeenCalled();
+    });
+
+    it('should disconnect from database after loading', async () => {
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      expect(mockSQLiteClient.disconnect).toHaveBeenCalled();
+    });
+
+    it('should disconnect even if loading fails', async () => {
+      mockSQLiteClient.simulateQueryFailure(true);
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow();
+      expect(mockSQLiteClient.disconnect).toHaveBeenCalled();
+    });
+  });
+
+  describe('Data Validation', () => {
+    it('should validate nodes before persistence', async () => {
+      const validNodes = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCodeNode())
+      ];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(validNodes, edges);
+
+      expect(result.success).toBe(true);
+      expect(result.results.sqlite.success).toBe(true);
+    });
+
+    it('should reject nodes with missing required fields', async () => {
+      const invalidNodes: any[] = [
+        {
+          id: '', // Empty ID
+          type: 'FileNode',
+          properties: {},
+          embedding: [0.1, 0.2, 0.3],
+          sourceText: 'test'
+        }
+      ];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(invalidNodes, edges)).rejects.toThrow(DataValidationError);
+    });
+
+    it('should reject nodes with invalid types', async () => {
+      const invalidNodes: any[] = [
+        {
+          id: 'test-1',
+          type: '', // Empty type (invalid)
+          properties: {},
+          embedding: [0.1, 0.2, 0.3],
+          sourceText: 'test'
+        }
+      ];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(invalidNodes, edges)).rejects.toThrow(DataValidationError);
+    });
+
+    it('should validate edges before persistence', async () => {
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile({ id: 'file-1' })),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCodeNode({ id: 'code-1' }))
+      ];
+      const validEdges = [
+        TestDataFactory.createEdge({ source: 'file-1', target: 'code-1', type: 'CONTAINS' })
+      ];
+
+      const result = await dataLoader.load(nodes, validEdges);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject edges with missing source or target', async () => {
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const invalidEdges: any[] = [
+        {
+          source: '', // Empty source
+          target: 'node-2',
+          type: 'CALLS',
+          properties: {}
+        }
+      ];
+
+      await expect(dataLoader.load(nodes, invalidEdges)).rejects.toThrow(DataValidationError);
+    });
+
+    it('should reject edges referencing non-existent nodes', async () => {
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile({ id: 'file-1' }))];
+      const invalidEdges = [
+        TestDataFactory.createEdge({ source: 'file-1', target: 'non-existent-node', type: 'CALLS' })
+      ];
+
+      await expect(dataLoader.load(nodes, invalidEdges)).rejects.toThrow(DataValidationError);
+    });
+
+    it('should detect duplicate node IDs', async () => {
+      const duplicateNodes = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile({ id: 'duplicate-id' })),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCodeNode({ id: 'duplicate-id' }))
+      ];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(duplicateNodes, edges)).rejects.toThrow(DataValidationError);
+    });
+  });
+
+  describe('Batch Processing', () => {
+    it('should process nodes in batches by type', async () => {
+      const { repositories, files, nodes } = TestDataFactory.generateLargeDataset('small');
+      const nodesWithEmbeddings = [
+        ...repositories.map(r => TestDataFactory.createNodeWithEmbedding(r)),
+        ...files.map(f => TestDataFactory.createNodeWithEmbedding(f)),
+        ...nodes.map(n => TestDataFactory.createNodeWithEmbedding(n))
+      ];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodesWithEmbeddings, edges);
+
+      expect(result.success).toBe(true);
+      expect(mockSQLiteClient.transaction).toHaveBeenCalled();
+    });
+
+    it('should handle large datasets efficiently', async () => {
+      const { repositories, files, nodes } = TestDataFactory.generateLargeDataset('medium');
+      const nodesWithEmbeddings = [
+        ...repositories.map(r => TestDataFactory.createNodeWithEmbedding(r)),
+        ...files.map(f => TestDataFactory.createNodeWithEmbedding(f)),
+        ...nodes.map(n => TestDataFactory.createNodeWithEmbedding(n))
+      ];
+      const edges: Edge[] = [];
+
+      const startTime = Date.now();
+      const result = await dataLoader.load(nodesWithEmbeddings, edges);
+      const endTime = Date.now();
+
+      expect(result.success).toBe(true);
+      expect(endTime - startTime).toBeLessThan(5000); // Should complete within 5 seconds
+    });
+
+    it('should process different node types correctly', async () => {
+      const nodes: NodeWithEmbedding[] = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createRepository()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCodeNode()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCommit()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createTestNode()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createPullRequest()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFunctionNode())
+      ];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+      // prepare is called for each table type plus function_calls
+      expect(mockSQLiteClient.prepare).toHaveBeenCalled();
+    });
+
+    it('should maintain referential integrity during batch processing', async () => {
+      const repository = TestDataFactory.createRepository({ id: 'repo-1' });
+      const file = TestDataFactory.createFile({ id: 'file-1', repositoryId: 'repo-1' });
+      const functionNode = TestDataFactory.createFunctionNode({ id: 'func-1', fileId: 'file-1' });
+
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(repository),
+        TestDataFactory.createNodeWithEmbedding(file),
+        TestDataFactory.createNodeWithEmbedding(functionNode)
+      ];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+      // Verify transaction was used to maintain consistency
+      expect(mockSQLiteClient.transaction).toHaveBeenCalled();
+    });
+  });
+
+  describe('Error Handling and Recovery', () => {
+    it('should handle database operation failures', async () => {
+      mockSQLiteClient.simulateQueryFailure(true);
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow();
+    });
+
+    it('should rollback transaction on failure', async () => {
+      // Simulate failure during transaction
+      mockSQLiteClient.transaction.mockImplementation(() => {
+        throw new Error('Transaction failed');
+      });
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow();
+      expect(mockSQLiteClient.transaction).toHaveBeenCalled();
+    });
+
+    it('should handle partial node insertion failures gracefully', async () => {
+      // Mock prepare to fail for specific node types
+      const originalPrepare = mockSQLiteClient.prepare;
+      mockSQLiteClient.prepare.mockImplementation((sql: any) => {
+        if (typeof sql === 'string' && sql.includes('files')) {
+          throw new Error('File insertion failed');
+        }
+        return originalPrepare.call(mockSQLiteClient, sql);
+      });
+
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createRepository()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile()) // This should fail
+      ];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow();
+    });
+
+    it('should handle vector storage failures gracefully', async () => {
+      mockSQLiteClient.storeVector.mockRejectedValue(new Error('Vector storage failed') as never);
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      // Should still succeed even if vector storage fails (it's logged as warning)
+      const result = await dataLoader.load(nodes, edges);
+      expect(result.success).toBe(true);
+    });
+
+    it('should provide detailed error information', async () => {
+      mockSQLiteClient.simulateConnectionFailure(true);
+      mockWithRetry.mockRejectedValueOnce(new DatabaseConnectionError('SQLite', 'Connection timeout'));
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      try {
+        await dataLoader.load(nodes, edges);
+        fail('Expected error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(DatabaseConnectionError);
+        expect((error as DatabaseConnectionError).message).toContain('Connection timeout');
+      }
+    });
+  });
+
+  describe('Retry Mechanisms and Failure Recovery', () => {
+    it('should retry database connections on failure', async () => {
+      let connectionAttempts = 0;
       
-//       // Should not have LanceDB references
-//       expect(stats.databases).not.toHaveProperty('lancedb');
-//       expect(stats.connectivity).not.toHaveProperty('lancedb');
-//     });
+      // Mock the withRetry function to simulate actual retry behavior
+      mockWithRetry.mockImplementation(async (fn, config, logger, operation) => {
+        // Simulate the actual retry logic
+        for (let attempt = 1; attempt <= (config?.maxAttempts || 3); attempt++) {
+          try {
+            connectionAttempts++;
+            if (connectionAttempts < 3) {
+              // Simulate connection failure on first two attempts
+              mockSQLiteClient.simulateConnectionFailure(true);
+            } else {
+              // Success on third attempt
+              mockSQLiteClient.simulateConnectionFailure(false);
+            }
+            return await fn();
+          } catch (error) {
+            if (attempt === (config?.maxAttempts || 3)) {
+              throw error;
+            }
+            // Continue to next attempt
+          }
+        }
+      });
 
-//     it('should handle connection failures gracefully', async () => {
-//       const invalidLoader = new DataLoader('/invalid/path/database.db', config);
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+      expect(mockWithRetry).toHaveBeenCalled();
+      expect(connectionAttempts).toBe(3);
+    });
+
+    it('should respect retry configuration', async () => {
+      mockWithRetry.mockImplementation(async (fn, retryConfig, logger, operation) => {
+        expect(retryConfig).toBeDefined();
+        if (retryConfig) {
+          expect(retryConfig.maxAttempts).toBeGreaterThan(0);
+          expect(retryConfig.baseDelayMs).toBeGreaterThan(0);
+        }
+        return await fn();
+      });
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      expect(mockWithRetry).toHaveBeenCalled();
+    });
+
+    it('should fail after maximum retry attempts', async () => {
+      mockWithRetry.mockRejectedValue(new Error('Max retries exceeded'));
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await expect(dataLoader.load(nodes, edges)).rejects.toThrow('Max retries exceeded');
+    });
+
+    it('should implement exponential backoff for retries', async () => {
+      const delays: number[] = [];
+      mockWithRetry.mockImplementation(async (fn, config, logger, operation) => {
+        // Simulate retry with backoff
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            if (attempt < 3 && config) {
+              const delay = config.baseDelayMs * Math.pow(2, attempt - 1);
+              delays.push(delay);
+              throw new Error(`Attempt ${attempt} failed`);
+            }
+            return await fn();
+          } catch (error) {
+            if (attempt === 3) throw error;
+          }
+        }
+      });
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+      expect(delays.length).toBeGreaterThan(0);
+      // Verify exponential backoff pattern
+      if (delays.length > 1) {
+        expect(delays[1]).toBeGreaterThan(delays[0]);
+      }
+    });
+  });
+
+  describe('Data Transformation and Persistence', () => {
+    it('should transform nodes to database format correctly', async () => {
+      const fileNode = TestDataFactory.createFile({
+        id: 'file-1',
+        name: 'test.ts',
+        path: 'src/test.ts',
+        extension: '.ts',
+        language: 'typescript'
+      });
+      const nodes = [TestDataFactory.createNodeWithEmbedding(fileNode)];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      // Verify that prepare was called with correct SQL for files table
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO files')
+      );
+    });
+
+    it('should handle nodes with embeddings', async () => {
+      // Ensure vector operations are enabled
+      mockSQLiteClient.enableVectorOperations(true);
       
-//       await expect(invalidLoader.load([], [])).rejects.toThrow();
-//     });
-//   });
+      const embedding = TestDataFactory.createEmbedding(384);
+      const fileNode = TestDataFactory.createFile();
+      const nodeWithEmbedding = {
+        ...fileNode,
+        embedding,
+        sourceText: 'test file content'
+      };
+      const nodes = [nodeWithEmbedding];
+      const edges: Edge[] = [];
 
-//   // describe('Data Loading with Vectors', () => {
-//   //   const createTestNodes = (): NodeWithEmbedding[] => [
-//   //     {
-//   //       id: 'file-1',
-//   //       type: 'FileNode',
-//   //       path: '/test/file1.ts',
-//   //       name: 'file1.ts',
-//   //       extension: 'ts',
-//   //       size: 1000,
-//   //       contentHash: 'hash1',
-//   //       repositoryId: 'repo-1',
-//   //       createdAt: new Date(),
-//   //       updatedAt: new Date(),
-//   //       embedding: [0.1, 0.2, 0.3, 0.4, 0.5]
-//   //     } as FileNode & { embedding: number[] },
-//   //     {
-//   //       id: 'code-1',
-//   //       type: 'CodeNode',
-//   //       fileId: 'file-1',
-//   //       startLine: 1,
-//   //       endLine: 10,
-//   //       content: 'function test() { return true; }',
-//   //       language: 'typescript',
-//   //       repositoryId: 'repo-1',
-//   //       createdAt: new Date(),
-//   //       updatedAt: new Date(),
-//   //       embedding: [0.2, 0.3, 0.4, 0.5, 0.6]
-//   //     } as CodeNode & { embedding: number[] },
-//   //     {
-//   //       id: 'commit-1',
-//   //       type: 'CommitNode',
-//   //       hash: 'abc123',
-//   //       message: 'Add test feature',
-//   //       authorName: 'Test Author',
-//   //       authorEmail: 'test@example.com',
-//   //       date: new Date(),
-//   //       repositoryId: 'repo-1',
-//   //       createdAt: new Date(),
-//   //       updatedAt: new Date(),
-//   //       embedding: [0.3, 0.4, 0.5, 0.6, 0.7]
-//   //     } as CommitNode & { embedding: number[] }
-//   //   ];
+      await dataLoader.load(nodes, edges);
 
-//   //   const createTestEdges = (): Edge[] => [
-//   //     {
-//   //       id: 'edge-1',
-//   //       source: 'file-1',
-//   //       target: 'code-1',
-//   //       type: 'contains',
-//   //       properties: {},
-//   //       createdAt: new Date(),
-//   //       updatedAt: new Date()
-//   //     }
-//   //   ];
+      expect(mockSQLiteClient.storeVector).toHaveBeenCalledWith(
+        'files',
+        'content_embedding',
+        fileNode.id,
+        embedding
+      );
+    });
 
-//   //   it('should load nodes and edges to unified SQLite storage', async () => {
-//   //     const nodes = createTestNodes();
-//   //     const edges = createTestEdges();
+    it('should handle nodes without embeddings', async () => {
+      const fileNode = TestDataFactory.createFile();
+      const nodeWithoutEmbedding = {
+        ...fileNode,
+        embedding: [], // Empty embedding
+        sourceText: 'test file content'
+      };
+      const nodes = [nodeWithoutEmbedding];
+      const edges: Edge[] = [];
 
-//   //     await dataLoader.load(nodes, edges);
+      const result = await dataLoader.load(nodes, edges);
 
-//   //     // Verify data was loaded
-//   //     const stats = await dataLoader.getStats();
-//   //     expect(stats.databases.sqlite).toBe(true);
-//   //   });
+      expect(result.success).toBe(true);
+      // storeVector should not be called for empty embeddings
+      expect(mockSQLiteClient.storeVector).not.toHaveBeenCalled();
+    });
 
-//   //   it('should handle nodes with embeddings correctly', async () => {
-//   //     const nodes = createTestNodes();
-//   //     const edges: Edge[] = [];
+    it('should store different node types in appropriate tables', async () => {
+      const repository = TestDataFactory.createRepository();
+      const file = TestDataFactory.createFile();
+      const codeNode = TestDataFactory.createCodeNode();
+      const commit = TestDataFactory.createCommit();
 
-//   //     await dataLoader.load(nodes, edges);
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(repository),
+        TestDataFactory.createNodeWithEmbedding(file),
+        TestDataFactory.createNodeWithEmbedding(codeNode),
+        TestDataFactory.createNodeWithEmbedding(commit)
+      ];
+      const edges: Edge[] = [];
 
-//   //     // All nodes should be loaded successfully
-//   //     const stats = await dataLoader.getStats();
-//   //     expect(stats.databases.sqlite).toBe(true);
-//   //   });
+      await dataLoader.load(nodes, edges);
 
-//   //   it('should handle nodes without embeddings gracefully', async () => {
-//   //     const nodesWithoutEmbeddings: NodeWithEmbedding[] = [
-//   //       {
-//   //         id: 'file-2',
-//   //         type: 'FileNode',
-//   //         path: '/test/file2.ts',
-//   //         name: 'file2.ts',
-//   //         extension: 'ts',
-//   //         size: 1000,
-//   //         contentHash: 'hash2',
-//   //         repositoryId: 'repo-1',
-//   //         createdAt: new Date(),
-//   //         updatedAt: new Date()
-//   //         // No embedding property
-//   //       } as FileNode
-//   //     ];
+      // Verify correct table insertions
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO repositories')
+      );
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO files')
+      );
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO code_nodes')
+      );
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO commits')
+      );
+    });
 
-//   //     await expect(
-//   //       dataLoader.load(nodesWithoutEmbeddings, [])
-//   //     ).resolves.not.toThrow();
-//   //   });
+    it('should handle edge insertion correctly', async () => {
+      const sourceNode = TestDataFactory.createFunctionNode({ id: 'func-1' });
+      const targetNode = TestDataFactory.createFunctionNode({ id: 'func-2' });
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(sourceNode),
+        TestDataFactory.createNodeWithEmbedding(targetNode)
+      ];
+      const edges = [
+        TestDataFactory.createCallsEdge('func-1', 'func-2')
+      ];
 
-//   //   it('should handle large datasets efficiently', async () => {
-//   //     const largeNodeSet: NodeWithEmbedding[] = [];
+      await dataLoader.load(nodes, edges);
+
+      expect(mockSQLiteClient.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT OR REPLACE INTO function_calls')
+      );
+    });
+  });
+
+  describe('Vector Operations', () => {
+    it('should store vector embeddings when vector operations are enabled', async () => {
+      mockSQLiteClient.enableVectorOperations(true);
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      expect(mockSQLiteClient.storeVector).toHaveBeenCalled();
+    });
+
+    it('should skip vector storage when vector operations are disabled', async () => {
+      mockSQLiteClient.enableVectorOperations(false);
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile())];
+      const edges: Edge[] = [];
+
+      await dataLoader.load(nodes, edges);
+
+      expect(mockSQLiteClient.storeVector).not.toHaveBeenCalled();
+    });
+
+    it('should handle different embedding dimensions', async () => {
+      mockSQLiteClient.enableVectorOperations(true);
       
-//   //     // Create 500 test nodes
-//   //     for (let i = 0; i < 500; i++) {
-//   //       largeNodeSet.push({
-//   //         id: `file-${i}`,
-//   //         type: 'FileNode',
-//   //         path: `/test/file${i}.ts`,
-//   //         name: `file${i}.ts`,
-//   //         extension: 'ts',
-//   //         size: 1000,
-//   //         contentHash: `hash${i}`,
-//   //         repositoryId: 'repo-1',
-//   //         createdAt: new Date(),
-//   //         updatedAt: new Date(),
-//   //         embedding: Array.from({ length: 384 }, () => Math.random())
-//   //       } as FileNode & { embedding: number[] });
-//   //     }
+      const embedding128 = TestDataFactory.createEmbedding(128);
+      const embedding384 = TestDataFactory.createEmbedding(384);
+      const embedding768 = TestDataFactory.createEmbedding(768);
 
-//   //     const startTime = Date.now();
-//   //     await dataLoader.load(largeNodeSet, []);
-//   //     const endTime = Date.now();
+      const nodes = [
+        { ...TestDataFactory.createFile({ id: 'file-1' }), embedding: embedding128, sourceText: 'test1' },
+        { ...TestDataFactory.createFile({ id: 'file-2' }), embedding: embedding384, sourceText: 'test2' },
+        { ...TestDataFactory.createFile({ id: 'file-3' }), embedding: embedding768, sourceText: 'test3' }
+      ];
+      const edges: Edge[] = [];
 
-//   //     // Should complete within reasonable time (less than 10 seconds)
-//   //     expect(endTime - startTime).toBeLessThan(10000);
-//   //   });
-//   // });
+      const result = await dataLoader.load(nodes, edges);
 
-//   describe('Error Handling and Recovery', () => {
-//     it('should handle database connection errors', async () => {
-//       const invalidLoader = new DataLoader('/invalid/path/database.db', config);
-//       const nodes = createTestNodes();
+      expect(result.success).toBe(true);
+      expect(mockSQLiteClient.storeVector).toHaveBeenCalledTimes(3);
+    });
+  });
 
-//       await expect(invalidLoader.load(nodes, [])).rejects.toThrow();
-//     });
+  describe('Performance and Monitoring', () => {
+    it('should provide loading statistics', async () => {
+      const { repositories, files, nodes } = TestDataFactory.generateLargeDataset('small');
+      const nodesWithEmbeddings = [
+        ...repositories.map(r => TestDataFactory.createNodeWithEmbedding(r)),
+        ...files.map(f => TestDataFactory.createNodeWithEmbedding(f)),
+        ...nodes.map(n => TestDataFactory.createNodeWithEmbedding(n))
+      ];
+      const edges: Edge[] = [];
 
-//     it('should handle malformed node data', async () => {
-//       const malformedNodes: any[] = [
-//         {
-//           // Missing required fields
-//           id: 'malformed-1',
-//           type: 'FileNode'
-//           // Missing path, name, etc.
-//         }
-//       ];
+      const result = await dataLoader.load(nodesWithEmbeddings, edges);
 
-//       await expect(
-//         dataLoader.load(malformedNodes, [])
-//       ).rejects.toThrow();
-//     });
+      expect(result.success).toBe(true);
+      expect(result.results).toBeDefined();
+      expect(result.results.sqlite).toBeDefined();
+      expect(result.results.sqlite.success).toBe(true);
+    });
 
-//     it('should handle partial failures gracefully', async () => {
-//       const mixedNodes: NodeWithEmbedding[] = [
-//         // Valid node
-//         {
-//           id: 'file-1',
-//           type: 'FileNode',
-//           path: '/test/file1.ts',
-//           name: 'file1.ts',
-//           extension: 'ts',
-//           size: 1000,
-//           contentHash: 'hash1',
-//           repositoryId: 'repo-1',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           embedding: [0.1, 0.2, 0.3, 0.4, 0.5]
-//         } as FileNode & { embedding: number[] },
-//         // Node with invalid embedding
-//         {
-//           id: 'file-2',
-//           type: 'FileNode',
-//           path: '/test/file2.ts',
-//           name: 'file2.ts',
-//           extension: 'ts',
-//           size: 1000,
-//           contentHash: 'hash2',
-//           repositoryId: 'repo-1',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           embedding: [NaN, Infinity, -Infinity] // Invalid embedding
-//         } as FileNode & { embedding: number[] }
-//       ];
+    it('should track node type statistics during loading', async () => {
+      const nodes = [
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createRepository()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile()),
+        TestDataFactory.createNodeWithEmbedding(TestDataFactory.createCodeNode())
+      ];
+      const edges: Edge[] = [];
 
-//       // Should handle the error gracefully
-//       await expect(
-//         dataLoader.load(mixedNodes, [])
-//       ).rejects.toThrow();
-//     });
+      const result = await dataLoader.load(nodes, edges);
 
-//     it('should retry failed operations', async () => {
-//       const nodes = createTestNodes();
-      
-//       // First attempt might fail due to connection issues
-//       // DataLoader should retry automatically
-//       await expect(
-//         dataLoader.load(nodes, [])
-//       ).resolves.not.toThrow();
-//     });
-//   });
+      expect(result.success).toBe(true);
+      // The internal getNodeTypeStats method should be called
+      // We can't directly test it, but we can verify the loading succeeded
+    });
 
-//   describe('Statistics and Monitoring', () => {
-//     it('should provide accurate loading statistics', async () => {
-//       const nodes = createTestNodes();
-//       const edges = createTestEdges();
+    it('should handle concurrent loading operations', async () => {
+      const nodes1 = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile({ id: 'file-1' }))];
+      const nodes2 = [TestDataFactory.createNodeWithEmbedding(TestDataFactory.createFile({ id: 'file-2' }))];
+      const edges: Edge[] = [];
 
-//       await dataLoader.load(nodes, edges);
+      // Create separate data loader instances to simulate concurrency
+      const loader1 = new DataLoader(testDbPath + '1', config);
+      const loader2 = new DataLoader(testDbPath + '2', config);
 
-//       const stats = await dataLoader.getStats();
-      
-//       expect(stats).toHaveProperty('databases');
-//       expect(stats).toHaveProperty('lastLoad');
-//       expect(stats).toHaveProperty('connectivity');
-      
-//       expect(stats.databases.sqlite).toBe(true);
-//       expect(stats.connectivity.sqlite).toBe(true);
-//       expect(stats.lastLoad).toBeInstanceOf(Date);
-//     });
+      const [result1, result2] = await Promise.all([
+        loader1.load(nodes1, edges),
+        loader2.load(nodes2, edges)
+      ]);
 
-//     it('should track database connectivity status', async () => {
-//       const connectivity = await dataLoader.verifyDatabaseConnectivity();
-      
-//       expect(connectivity).toHaveProperty('sqlite');
-//       expect(typeof connectivity.sqlite).toBe('boolean');
-      
-//       // Should not have LanceDB connectivity
-//       expect(connectivity).not.toHaveProperty('lancedb');
-//     });
-//   });
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+    });
+  });
 
-//   describe('Unified Storage Verification', () => {
-//     it('should store all data types in single SQLite database', async () => {
-//       const nodes: NodeWithEmbedding[] = [
-//         {
-//           id: 'file-1',
-//           type: 'FileNode',
-//           path: '/test/file1.ts',
-//           name: 'file1.ts',
-//           extension: 'ts',
-//           size: 1000,
-//           contentHash: 'hash1',
-//           repositoryId: 'repo-1',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           embedding: [0.1, 0.2, 0.3]
-//         } as FileNode & { embedding: number[] },
-//         {
-//           id: 'code-1',
-//           type: 'CodeNode',
-//           fileId: 'file-1',
-//           startLine: 1,
-//           endLine: 10,
-//           content: 'function test() {}',
-//           language: 'typescript',
-//           repositoryId: 'repo-1',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           embedding: [0.2, 0.3, 0.4]
-//         } as CodeNode & { embedding: number[] },
-//         {
-//           id: 'commit-1',
-//           type: 'CommitNode',
-//           hash: 'abc123',
-//           message: 'Test commit',
-//           authorName: 'Test Author',
-//           authorEmail: 'test@example.com',
-//           date: new Date(),
-//           repositoryId: 'repo-1',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           embedding: [0.3, 0.4, 0.5]
-//         } as CommitNode & { embedding: number[] }
-//       ];
+  describe('Edge Cases and Boundary Conditions', () => {
+    it('should handle empty node and edge arrays', async () => {
+      const nodes: NodeWithEmbedding[] = [];
+      const edges: Edge[] = [];
 
-//       const edges: Edge[] = [
-//         {
-//           id: 'edge-1',
-//           source: 'file-1',
-//           target: 'code-1',
-//           type: 'contains',
-//           properties: {},
-//           createdAt: new Date(),
-//           updatedAt: new Date()
-//         }
-//       ];
+      const result = await dataLoader.load(nodes, edges);
 
-//       await dataLoader.load(nodes, edges);
+      expect(result.success).toBe(true);
+    });
 
-//       // Verify all data is in single database
-//       const stats = await dataLoader.getStats();
-//       expect(stats.databases.sqlite).toBe(true);
-      
-//       // Should only have SQLite connection
-//       expect(Object.keys(stats.databases)).toEqual(['sqlite']);
-//       expect(Object.keys(stats.connectivity)).toEqual(['sqlite']);
-//     });
+    it('should handle nodes with null or undefined properties', async () => {
+      const nodeWithNullProps: any = {
+        id: 'test-node',
+        type: 'FileNode',
+        properties: {
+          filePath: 'test.ts',
+          fileName: 'test.ts',
+          fileExtension: '.ts',
+          repoId: 'repo-1',
+          language: null, // null property
+          sizeKb: undefined, // undefined property
+          contentHash: 'hash123'
+        },
+        embedding: [0.1, 0.2, 0.3],
+        sourceText: 'test'
+      };
 
-//     it('should handle vector and metadata storage together', async () => {
-//       const nodeWithEmbedding: NodeWithEmbedding = {
-//         id: 'test-node',
-//         type: 'FileNode',
-//         path: '/test/file.ts',
-//         name: 'file.ts',
-//         extension: 'ts',
-//         size: 1000,
-//         contentHash: 'hash',
-//         repositoryId: 'repo-1',
-//         createdAt: new Date(),
-//         updatedAt: new Date(),
-//         embedding: Array.from({ length: 384 }, () => Math.random())
-//       } as FileNode & { embedding: number[] };
+      const nodes = [nodeWithNullProps];
+      const edges: Edge[] = [];
 
-//       await dataLoader.load([nodeWithEmbedding], []);
+      const result = await dataLoader.load(nodes, edges);
 
-//       // Both metadata and vector should be stored in same database
-//       const stats = await dataLoader.getStats();
-//       expect(stats.databases.sqlite).toBe(true);
-//     });
-//   });
+      expect(result.success).toBe(true);
+    });
 
-//   describe('Disconnection and Cleanup', () => {
-//     it('should disconnect from SQLite database cleanly', async () => {
-//       const nodes = createTestNodes();
-//       await dataLoader.load(nodes, []);
+    it('should handle very large embeddings', async () => {
+      const largeEmbedding = TestDataFactory.createEmbedding(4096); // Very large embedding
+      const node = {
+        ...TestDataFactory.createFile(),
+        embedding: largeEmbedding,
+        sourceText: 'test with large embedding'
+      };
 
-//       await dataLoader.disconnect();
+      const nodes = [node];
+      const edges: Edge[] = [];
 
-//       // After disconnect, connectivity should be false
-//       const connectivity = await dataLoader.verifyDatabaseConnectivity();
-//       expect(connectivity.sqlite).toBe(false);
-//     });
+      const result = await dataLoader.load(nodes, edges);
 
-//     it('should handle multiple disconnect calls gracefully', async () => {
-//       await dataLoader.disconnect();
-//       await expect(dataLoader.disconnect()).resolves.not.toThrow();
-//     });
-//   });
+      expect(result.success).toBe(true);
+    });
 
-//   // Helper function to create test nodes
-//   function createTestNodes(): NodeWithEmbedding[] {
-//     return [
-//       {
-//         id: 'file-1',
-//         type: 'FileNode',
-//         path: '/test/file1.ts',
-//         name: 'file1.ts',
-//         extension: 'ts',
-//         size: 1000,
-//         contentHash: 'hash1',
-//         repositoryId: 'repo-1',
-//         createdAt: new Date(),
-//         updatedAt: new Date(),
-//         embedding: [0.1, 0.2, 0.3, 0.4, 0.5]
-//       } as FileNode & { embedding: number[] }
-//     ];
-//   }
-// });
+    it('should handle special characters in node properties', async () => {
+      const nodeWithSpecialChars = TestDataFactory.createFile({
+        name: 'test-file-with-特殊字符-and-émojis-🚀.ts',
+        path: 'src/special/test-file-with-特殊字符-and-émojis-🚀.ts'
+      });
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(nodeWithSpecialChars)];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should handle maximum safe integer values', async () => {
+      const nodeWithLargeNumbers = TestDataFactory.createCodeNode({
+        properties: {
+          startLine: Number.MAX_SAFE_INTEGER - 1,
+          endLine: Number.MAX_SAFE_INTEGER,
+          name: 'testFunction',
+          language: 'typescript',
+          filePath: 'test.ts'
+        }
+      });
+
+      const nodes = [TestDataFactory.createNodeWithEmbedding(nodeWithLargeNumbers)];
+      const edges: Edge[] = [];
+
+      const result = await dataLoader.load(nodes, edges);
+
+      expect(result.success).toBe(true);
+    });
+  });
+});

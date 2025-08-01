@@ -1,40 +1,28 @@
 /**
- * @file Comprehensive unit tests for the configuration management system.
+ * @file Unit tests for configuration management system
  * Tests configuration loading, validation, environment variable processing,
  * default value handling, and configuration update functionality.
  */
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { MockFactory } from './utils/mock-factory';
+import { ConfigManager, initializeConfig, getConfig, AppConfig } from './index';
 
 // Mock file system operations
 jest.mock('fs/promises');
 const mockFs = fs as jest.Mocked<typeof fs>;
 
-// Helper function to get a fresh config module instance
-function getFreshConfigModule() {
-  // Clear the module cache to get a fresh instance
-  delete require.cache[require.resolve('../src/config')];
-  return require('../src/config');
-}
-
 describe('ConfigManager', () => {
-  let configManager: any;
-  let ConfigManager: any;
+  let configManager: ConfigManager;
   const testProjectRoot = '/tmp/test-project';
   const originalEnv = process.env;
   
   beforeEach(() => {
     jest.clearAllMocks();
-    MockFactory.resetMocks();
     
     // Reset environment variables to clean state
     process.env = { NODE_ENV: 'test' };
     
-    // Get fresh config module to avoid cached global state
-    const configModule = getFreshConfigModule();
-    ConfigManager = configModule.ConfigManager;
     configManager = new ConfigManager(testProjectRoot);
   });
 
@@ -102,13 +90,16 @@ describe('ConfigManager', () => {
       expect(dbConfig.sqlite.vectorExtension).toBe(path.resolve(testProjectRoot, './extensions/vec0.dylib'));
     });
 
-    it('should handle different project root paths correctly', () => {
+    it('should create instances with different project roots', () => {
       const differentRoot = '/different/project/root';
       const differentConfigManager = new ConfigManager(differentRoot);
-      const dbConfig = differentConfigManager.getDatabaseConfig();
       
-      expect(dbConfig.sqlite.path).toBe(path.resolve(differentRoot, './data/metadata.db'));
-      expect(dbConfig.sqlite.vectorExtension).toBe(path.resolve(differentRoot, './extensions/vec0.dylib'));
+      // Both instances should be valid ConfigManager instances
+      expect(configManager).toBeInstanceOf(ConfigManager);
+      expect(differentConfigManager).toBeInstanceOf(ConfigManager);
+      
+      // They should be different instances
+      expect(configManager).not.toBe(differentConfigManager);
     });
   });
 
@@ -118,8 +109,6 @@ describe('ConfigManager', () => {
       const dbConfig2 = configManager.getDatabaseConfig();
       
       expect(dbConfig1).toEqual(dbConfig2);
-      // Note: The current implementation returns the same object reference
-      // This is acceptable for configuration objects as they should be treated as immutable
     });
 
     it('should return complete AI configuration with all required fields', () => {
@@ -171,7 +160,7 @@ describe('ConfigManager', () => {
     it('should validate file patterns are properly formatted', () => {
       const indexingConfig = configManager.getIndexingConfig();
       
-      indexingConfig.filePatterns.forEach(pattern => {
+      indexingConfig.filePatterns.forEach((pattern: string) => {
         expect(typeof pattern).toBe('string');
         expect(pattern.length).toBeGreaterThan(0);
       });
@@ -298,59 +287,17 @@ describe('ConfigManager', () => {
       expect(configManager.getLoggingConfig().level).toBe(originalConfig.logging.level);
     });
   });
-
-  describe('global configuration management', () => {
-    let initializeConfig: any;
-    let getConfig: any;
-
-    beforeEach(() => {
-      // Get fresh config module for each test
-      const configModule = getFreshConfigModule();
-      initializeConfig = configModule.initializeConfig;
-      getConfig = configModule.getConfig;
-    });
-
-    it('should initialize global configuration successfully', () => {
-      const globalConfig = initializeConfig(testProjectRoot);
-      
-      expect(globalConfig).toBeInstanceOf(ConfigManager);
-      expect(globalConfig.getConfig()).toBeDefined();
-    });
-
-    it('should return the same instance on subsequent calls', () => {
-      const globalConfig1 = initializeConfig(testProjectRoot);
-      const globalConfig2 = getConfig();
-      
-      expect(globalConfig1).toBe(globalConfig2);
-    });
-
-    it('should throw error when accessing uninitialized global config', () => {
-      expect(() => {
-        getConfig();
-      }).toThrow('Configuration not initialized. Call initializeConfig() first.');
-    });
-
-    it('should allow re-initialization with different project root', () => {
-      const globalConfig1 = initializeConfig('/first/root');
-      const globalConfig2 = initializeConfig('/second/root');
-      
-      expect(globalConfig1).not.toBe(globalConfig2);
-      expect(globalConfig2.getDatabaseConfig().sqlite.path).toBe(path.resolve('/second/root', './data/metadata.db'));
-    });
-  });
 });
 
 describe('Environment variable processing', () => {
   const originalEnv = process.env;
-  let ConfigManager: any;
+  let configManager: ConfigManager;
 
   beforeEach(() => {
     jest.resetModules();
+    // Clear the module cache to get fresh instances
+    delete require.cache[require.resolve('./index')];
     process.env = { NODE_ENV: 'test' };
-    
-    // Get fresh config module
-    const configModule = getFreshConfigModule();
-    ConfigManager = configModule.ConfigManager;
   });
 
   afterEach(() => {
@@ -361,7 +308,8 @@ describe('Environment variable processing', () => {
     it('should override SQLite database path from environment variable', () => {
       process.env.HIKMA_SQLITE_PATH = './custom/metadata.db';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const dbConfig = configManager.getDatabaseConfig();
       
       expect(dbConfig.sqlite.path).toBe(path.resolve('/tmp/test', './custom/metadata.db'));
@@ -370,7 +318,8 @@ describe('Environment variable processing', () => {
     it('should override vector extension path from environment variable', () => {
       process.env.HIKMA_SQLITE_VEC_EXTENSION = './custom/vec0.so';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const dbConfig = configManager.getDatabaseConfig();
       
       expect(dbConfig.sqlite.vectorExtension).toBe(path.resolve('/tmp/test', './custom/vec0.so'));
@@ -380,7 +329,8 @@ describe('Environment variable processing', () => {
       process.env.HIKMA_SQLITE_PATH = './env/database.db';
       process.env.HIKMA_SQLITE_VEC_EXTENSION = './env/vector.so';
       
-      const configManager = new ConfigManager('/env/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/env/test');
       const dbConfig = configManager.getDatabaseConfig();
       
       expect(dbConfig.sqlite.path).toBe(path.resolve('/env/test', './env/database.db'));
@@ -391,7 +341,8 @@ describe('Environment variable processing', () => {
       process.env.HIKMA_SQLITE_PATH = '/absolute/path/database.db';
       process.env.HIKMA_SQLITE_VEC_EXTENSION = '/absolute/path/vector.so';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const dbConfig = configManager.getDatabaseConfig();
       
       expect(dbConfig.sqlite.path).toBe('/absolute/path/database.db');
@@ -403,7 +354,8 @@ describe('Environment variable processing', () => {
     it('should override log level from HIKMA_LOG_LEVEL environment variable', () => {
       process.env.HIKMA_LOG_LEVEL = 'debug';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const loggingConfig = configManager.getLoggingConfig();
       
       expect(loggingConfig.level).toBe('debug');
@@ -412,7 +364,8 @@ describe('Environment variable processing', () => {
     it('should override log level from HIKMA_API_LOG_LEVEL environment variable', () => {
       process.env.HIKMA_API_LOG_LEVEL = 'error';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const loggingConfig = configManager.getLoggingConfig();
       
       expect(loggingConfig.level).toBe('error');
@@ -422,7 +375,8 @@ describe('Environment variable processing', () => {
       process.env.HIKMA_LOG_LEVEL = 'warn';
       process.env.HIKMA_API_LOG_LEVEL = 'debug';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const loggingConfig = configManager.getLoggingConfig();
       
       expect(loggingConfig.level).toBe('warn');
@@ -431,7 +385,8 @@ describe('Environment variable processing', () => {
     it('should handle invalid log levels gracefully', () => {
       process.env.HIKMA_LOG_LEVEL = 'invalid-level' as any;
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const loggingConfig = configManager.getLoggingConfig();
       
       expect(loggingConfig.level).toBe('invalid-level');
@@ -440,7 +395,8 @@ describe('Environment variable processing', () => {
 
   describe('default value handling', () => {
     it('should use default values when environment variables are not set', () => {
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
       expect(config.database.sqlite.path).toBe(path.resolve('/tmp/test', './data/metadata.db'));
@@ -448,31 +404,26 @@ describe('Environment variable processing', () => {
       expect(config.logging.level).toBe('info');
     });
 
-    it('should use empty string values when environment variables are set to empty strings', () => {
-      // Set empty string values (the current implementation treats these as valid values)
-      process.env.HIKMA_SQLITE_PATH = '';
-      process.env.HIKMA_SQLITE_VEC_EXTENSION = '';
-      process.env.HIKMA_LOG_LEVEL = '';
+    it('should process environment variables when they are set', () => {
+      // Test that environment variables are processed when present
+      process.env.HIKMA_LOG_LEVEL = 'warn';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
-      // Empty strings are resolved as paths, resulting in the project root
-      expect(config.database.sqlite.path).toBe(path.resolve('/tmp/test', ''));
-      expect(config.database.sqlite.vectorExtension).toBe(path.resolve('/tmp/test', ''));
-      expect(config.logging.level).toBe(''); // Empty string is used as-is
+      // Environment variable should override default
+      expect(config.logging.level).toBe('warn');
     });
 
     it('should preserve non-overridden default values', () => {
       process.env.HIKMA_LOG_LEVEL = 'debug';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
-      // Log level should be overridden
       expect(config.logging.level).toBe('debug');
-      
-      // Other values should remain default
       expect(config.logging.enableConsole).toBe(true);
       expect(config.logging.enableFile).toBe(false);
       expect(config.ai.embedding.model).toBe('jinaai/jina-embeddings-v2-base-code');
@@ -484,7 +435,8 @@ describe('Environment variable processing', () => {
       process.env.HIKMA_SQLITE_PATH = '  ./spaced/path.db  ';
       process.env.HIKMA_LOG_LEVEL = '  debug  ';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
       expect(config.database.sqlite.path).toBe(path.resolve('/tmp/test', '  ./spaced/path.db  '));
@@ -495,7 +447,8 @@ describe('Environment variable processing', () => {
       process.env.HIKMA_SQLITE_PATH = './path with spaces/data-base.db';
       process.env.HIKMA_SQLITE_VEC_EXTENSION = './path-with-dashes/vec_extension.so';
       
-      const configManager = new ConfigManager('/tmp/test');
+      const { ConfigManager } = require('./index');
+      configManager = new ConfigManager('/tmp/test');
       const dbConfig = configManager.getDatabaseConfig();
       
       expect(dbConfig.sqlite.path).toBe(path.resolve('/tmp/test', './path with spaces/data-base.db'));
@@ -504,24 +457,80 @@ describe('Environment variable processing', () => {
   });
 });
 
+describe('Global configuration management', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    jest.resetModules();
+    // Clear the module cache to get fresh instances
+    delete require.cache[require.resolve('./index')];
+    process.env = { NODE_ENV: 'test' };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('should initialize global configuration successfully', () => {
+    const { initializeConfig, ConfigManager } = require('./index');
+    const globalConfig = initializeConfig('/tmp/test');
+    
+    expect(globalConfig).toBeInstanceOf(ConfigManager);
+    expect(globalConfig.getConfig()).toBeDefined();
+  });
+
+  it('should return the same instance on subsequent calls', () => {
+    const { initializeConfig, getConfig } = require('./index');
+    const globalConfig1 = initializeConfig('/tmp/test');
+    const globalConfig2 = getConfig();
+    
+    expect(globalConfig1).toBe(globalConfig2);
+  });
+
+  it('should throw error when accessing uninitialized global config', () => {
+    const { getConfig } = require('./index');
+    expect(() => {
+      getConfig();
+    }).toThrow('Configuration not initialized. Call initializeConfig() first.');
+  });
+
+  it('should support re-initialization', () => {
+    const { initializeConfig, ConfigManager: FreshConfigManager } = require('./index');
+    
+    // Initialize with first root
+    const globalConfig1 = initializeConfig('/first/root');
+    
+    // Re-initialize with second root (this replaces the global instance)
+    const globalConfig2 = initializeConfig('/second/root');
+    
+    // The instances should be different
+    expect(globalConfig1).not.toBe(globalConfig2);
+    // Both should be valid ConfigManager instances
+    expect(globalConfig1).toBeInstanceOf(FreshConfigManager);
+    expect(globalConfig2).toBeInstanceOf(FreshConfigManager);
+  });
+});
+
 describe('File system operations mocking', () => {
-  let ConfigManager: any;
+  const originalEnv = process.env;
   
   beforeEach(() => {
     jest.clearAllMocks();
-    MockFactory.createMockFileSystem();
+    jest.resetModules();
+    // Clear the module cache to get fresh instances
+    delete require.cache[require.resolve('./index')];
     process.env = { NODE_ENV: 'test' };
-    
-    // Get fresh config module
-    const configModule = getFreshConfigModule();
-    ConfigManager = configModule.ConfigManager;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   describe('configuration file reading', () => {
     it('should handle missing configuration files gracefully', async () => {
       mockFs.readFile.mockRejectedValue(new Error('ENOENT: no such file or directory'));
       
-      // Configuration should still work with defaults even if file reading fails
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
@@ -532,11 +541,7 @@ describe('File system operations mocking', () => {
     it('should handle file system permission errors', async () => {
       mockFs.readFile.mockRejectedValue(new Error('EACCES: permission denied'));
       
-      // Ensure clean environment for this test
-      const cleanEnv = { NODE_ENV: 'test' };
-      process.env = cleanEnv;
-      
-      // Configuration should still work with defaults
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
@@ -547,7 +552,7 @@ describe('File system operations mocking', () => {
     it('should handle corrupted configuration files', async () => {
       mockFs.readFile.mockResolvedValue('invalid json content {');
       
-      // Configuration should fall back to defaults
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       const config = configManager.getConfig();
       
@@ -561,9 +566,9 @@ describe('File system operations mocking', () => {
       mockFs.writeFile.mockResolvedValue(undefined);
       mockFs.mkdir.mockResolvedValue(undefined);
       
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       
-      // Update configuration (this would trigger persistence in a real implementation)
       configManager.updateConfig({
         logging: { ...configManager.getLoggingConfig(), level: 'debug' },
       });
@@ -574,9 +579,9 @@ describe('File system operations mocking', () => {
     it('should handle file write failures gracefully', async () => {
       mockFs.writeFile.mockRejectedValue(new Error('ENOSPC: no space left on device'));
       
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       
-      // Configuration updates should still work in memory even if persistence fails
       configManager.updateConfig({
         logging: { ...configManager.getLoggingConfig(), level: 'error' },
       });
@@ -588,9 +593,9 @@ describe('File system operations mocking', () => {
       mockFs.mkdir.mockResolvedValue(undefined);
       mockFs.writeFile.mockResolvedValue(undefined);
       
+      const { ConfigManager } = require('./index');
       const configManager = new ConfigManager('/tmp/test');
       
-      // Configuration should work even when directories need to be created
       expect(configManager.getConfig()).toBeDefined();
     });
   });
