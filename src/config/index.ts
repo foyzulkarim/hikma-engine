@@ -56,7 +56,7 @@ const defaultConfig: AppConfig = {
   },
   ai: {
     embedding: {
-      model: 'jinaai/jina-embeddings-v2-base-code',
+      model: 'mixedbread-ai/mxbai-embed-large-v1',
       batchSize: 32,
       provider: 'transformers',
       localEndpoint: 'http://localhost:1234',
