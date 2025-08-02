@@ -15,7 +15,7 @@ import signal
 
 # Global model and tokenizer
 # MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"  # Default model
-MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"
+MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"  # Default model
 tokenizer = None
 model = None
 device = None
@@ -121,13 +121,13 @@ def main():
     """Main server loop."""
     global MODEL_NAME
     
-    # Set up signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    # Check for model name argument
+    # Accept model name as command line argument
     if len(sys.argv) > 1:
         MODEL_NAME = sys.argv[1]
+    
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     # Initialize model
     setup_model()

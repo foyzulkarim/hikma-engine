@@ -6,6 +6,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { getLogger } from '../utils/logger';
+import { ensurePythonDependencies } from '../utils/python-dependency-checker';
 
 export interface RAGResponse {
   success: boolean;
@@ -65,6 +66,8 @@ class LLMRAGService {
     const operation = this.logger.operation(`RAG explanation for: "${query.substring(0, 50)}..."`);
 
     try {
+      // Check Python dependencies before starting
+      await ensurePythonDependencies(false, false);
       this.logger.info('Starting RAG explanation generation', {
         query: query.substring(0, 100),
         resultCount: searchResults.length,
@@ -96,13 +99,25 @@ class LLMRAGService {
 
     } catch (error) {
       operation();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if this is a Python dependency error
+      if (errorMessage.includes('Python dependencies') || errorMessage.includes('Python 3 is required')) {
+        this.logger.error('Python dependencies not available for RAG', { error: errorMessage });
+        return {
+          success: false,
+          error: `RAG feature requires Python dependencies: ${errorMessage}`,
+          model
+        };
+      }
+      
       this.logger.error('RAG explanation error', {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage
       });
       
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        error: errorMessage,
         model: model
       };
     }
@@ -118,7 +133,11 @@ class LLMRAGService {
     timeout: number
   ): Promise<RAGResponse> {
     return new Promise((resolve, reject) => {
-      const pythonScript = path.join(__dirname, '..', 'python', 'llm_rag.py');
+      // Resolve Python script path - works for both dev (src/) and built (dist/) versions
+      const isBuilt = __dirname.includes('dist');
+      const pythonScript = isBuilt 
+        ? path.join(__dirname, '..', '..', 'src', 'python', 'llm_rag.py')
+        : path.join(__dirname, '..', 'python', 'llm_rag.py');
       
       this.logger.debug('Spawning Python RAG process', { 
         script: pythonScript,
@@ -131,6 +150,12 @@ class LLMRAGService {
       });
 
       this.activeProcess = pythonProcess;
+
+      // Handle stdin errors (like EPIPE)
+      pythonProcess.stdin.on('error', (error) => {
+        this.logger.warn('Python RAG process stdin error', { error: error.message });
+        // Don't throw here, just log the error
+      });
 
       let stdout = '';
       let stderr = '';
@@ -232,7 +257,10 @@ class LLMRAGService {
       };
 
       try {
-        pythonProcess.stdin.write(JSON.stringify(inputData));
+        const success = pythonProcess.stdin.write(JSON.stringify(inputData));
+        if (!success) {
+          this.logger.warn('Python RAG process stdin buffer full, waiting for drain');
+        }
         pythonProcess.stdin.end();
       } catch (error) {
         clearTimeout(timeoutHandle);
@@ -240,10 +268,11 @@ class LLMRAGService {
         if (hasResolved) return;
         hasResolved = true;
 
-        this.logger.error('Failed to send data to Python process', { 
-          error: error instanceof Error ? error.message : String(error)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error('Failed to send data to Python RAG process', { 
+          error: errorMessage
         });
-        reject(new Error(`Failed to send data to Python: ${error}`));
+        reject(new Error(`Failed to send data to Python: ${errorMessage}`));
       }
     });
   }

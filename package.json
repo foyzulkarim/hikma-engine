@@ -1,6 +1,6 @@
 {
   "name": "hikma-engine",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Code Knowledge Graph Indexer - A sophisticated TypeScript-based indexer that transforms Git repositories into multi-dimensional knowledge stores for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,8 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    "src/python/"
+    "src/python/",
+    "scripts/setup-python.js"
   ],
   "repository": {
     "type": "git",
@@ -25,11 +26,14 @@
   "scripts": {
     "embed": "ts-node src/cli/main.ts index",
     "search": "ts-node src/cli/main.ts search semantic",
-    "rag": "ts-node src/cli/main.ts answer",
+    "rag": "ts-node src/cli/main.ts search semantic",
     "build": "tsc",
     "prepublishOnly": "npm run clean && npm run build && npm test",
     "test": "jest",
-    "clean": "rm -rf dist data/*.db"
+    "clean": "rm -rf dist data/*.db",
+    "setup-python": "node scripts/setup-python.js",
+    "check-python": "node scripts/setup-python.js --instructions",
+    "postinstall": "node -e \"console.log('\\n🐍 For Python-based features (embeddings, RAG), run: npm run setup-python\\n💡 Or use: hikma --python-setup-help\\n');\""
   },
   "keywords": [
     "code-analysis",

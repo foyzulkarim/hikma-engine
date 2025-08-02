@@ -24,6 +24,7 @@ import { shutdownPythonEmbedding } from '../modules/embedding-py';
 import { ConfigManager } from '../config';
 import { initializeLogger, getLogger } from '../utils/logger';
 import { getErrorMessage, normalizeError } from '../utils/error-handling';
+import { PythonDependencyChecker, ensurePythonDependencies, isPythonEnvironmentReady } from '../utils/python-dependency-checker';
 import Table from 'cli-table3';
 
 /**
@@ -305,7 +306,10 @@ function createProgram(): Command {
   program
     .name('hikma')
     .description('Hikma Engine - Code Knowledge Graph and Search\n\nUnified CLI for indexing codebases and performing semantic, text, and hybrid searches.\nSupports multi-repository workflows with directory-specific indexing and searching.')
-    .version('2.0.0');
+    .version('2.0.0')
+    .option('--install-python-deps', 'Automatically install Python dependencies if missing')
+    .option('--check-python-deps', 'Check Python dependencies and exit')
+    .option('--python-setup-help', 'Display Python setup instructions and exit');
 
   // Index command
   const indexCmd = program
@@ -563,6 +567,27 @@ function createProgram(): Command {
             displayProgress('Generating detailed code explanation with LLM...');
             
             try {
+              // Check if we should auto-install Python dependencies
+              const globalOptions = program.opts();
+              if (globalOptions.installPythonDeps) {
+                try {
+                  await ensurePythonDependencies(true, true);
+                } catch (depError) {
+                  console.log(chalk.yellow('⚠️  Failed to install Python dependencies automatically:'), getErrorMessage(depError));
+                  console.log(chalk.blue('💡 Try running: hikma --python-setup-help'));
+                  throw depError;
+                }
+              } else {
+                // Check dependencies without auto-install
+                const isReady = await isPythonEnvironmentReady();
+                if (!isReady) {
+                  console.log(chalk.yellow('⚠️  Python dependencies are not available for RAG feature'));
+                  console.log(chalk.blue('💡 Run with --install-python-deps to install automatically, or:'));
+                  console.log(chalk.cyan('   hikma --python-setup-help'));
+                  throw new Error('Python dependencies required for RAG feature');
+                }
+              }
+              
               const ragOptions = {
                 model: options.ragModel,
                 timeout: 300000, // 5 minutes
@@ -581,7 +606,14 @@ function createProgram(): Command {
                 displayResults(results, 'Semantic Search Results', format);
               }
             } catch (error) {
-              console.error(chalk.red(`RAG explanation error: ${getErrorMessage(error)}`));
+              const errorMsg = getErrorMessage(error);
+              if (errorMsg.includes('Python dependencies') || errorMsg.includes('Python 3 is required')) {
+                console.log(chalk.red('❌ RAG feature requires Python dependencies'));
+                console.log(chalk.blue('💡 Setup instructions: hikma --python-setup-help'));
+                console.log(chalk.cyan('💡 Auto-install: hikma search semantic "your query" --rag --install-python-deps'));
+              } else {
+                console.error(chalk.red(`RAG explanation error: ${errorMsg}`));
+              }
               console.log(chalk.yellow('Falling back to showing search results:'));
               const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
               displayResults(results, 'Semantic Search Results', format);
@@ -1075,7 +1107,66 @@ function createProgram(): Command {
 // Main execution
 if (require.main === module) {
   const program = createProgram();
+  
+  // Handle global Python options before parsing commands
+  const args = process.argv;
+  
+  if (args.includes('--python-setup-help')) {
+    const checker = PythonDependencyChecker.getInstance();
+    checker.displaySetupInstructions();
+    process.exit(0);
+  }
+  
+  if (args.includes('--check-python-deps')) {
+    (async () => {
+      try {
+        const checker = PythonDependencyChecker.getInstance();
+        const envInfo = await checker.checkEnvironment();
+        
+        console.log(chalk.blue('\n🐍 Python Environment Status'));
+        console.log(chalk.gray('=' .repeat(40)));
+        console.log(`Python Available: ${envInfo.pythonAvailable ? chalk.green('✅ Yes') : chalk.red('❌ No')}`);
+        if (envInfo.pythonVersion) {
+          console.log(`Python Version: ${chalk.cyan(envInfo.pythonVersion)}`);
+        }
+        console.log(`Pip Available: ${envInfo.pipAvailable ? chalk.green('✅ Yes') : chalk.red('❌ No')}`);
+        console.log(`Dependencies Installed: ${envInfo.dependenciesInstalled ? chalk.green('✅ Yes') : chalk.red('❌ No')}`);
+        
+        if (envInfo.missingDependencies.length > 0) {
+          console.log(chalk.yellow('\n⚠️  Missing Dependencies:'));
+          envInfo.missingDependencies.forEach(dep => {
+            console.log(chalk.red(`   - ${dep}`));
+          });
+          console.log(chalk.blue('\n💡 Run with --install-python-deps to install automatically'));
+        }
+        
+        process.exit(envInfo.dependenciesInstalled ? 0 : 1);
+      } catch (error) {
+        console.error(chalk.red('❌ Error checking Python environment:'), error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    })();
+    process.exit(0);
+  }
+  
+  // Parse the program normally
   program.parse(process.argv);
+  
+  // Handle --install-python-deps after parsing to get the option value
+  const options = program.opts();
+  if (options.installPythonDeps) {
+    (async () => {
+      try {
+        console.log(chalk.blue('🔧 Installing Python dependencies...'));
+        const checker = PythonDependencyChecker.getInstance();
+        await checker.installDependencies(true);
+        console.log(chalk.green('✅ Python dependencies installation completed!'));
+      } catch (error) {
+        console.error(chalk.red('❌ Failed to install Python dependencies:'), error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    })();
+  }
 }
 
 export { createProgram };
