@@ -46,13 +46,13 @@ HIKMA_LOG_LEVEL=info
 
 ```bash
 # 1. Index your codebase
-hikma-engine embed
+hikma-engine index
 
 # 2. Search for code patterns
-hikma-engine search semantic "authentication logic"
+hikma-engine search "authentication logic"
 
-# 3. Ask questions about your code
-hikma-engine rag "How does error handling work?"
+# 3. Ask questions about your code with RAG
+hikma-engine search "How does error handling work?" --rag
 ```
 
 ## CLI Commands
@@ -62,29 +62,71 @@ hikma-engine rag "How does error handling work?"
 Index your codebase to create embeddings and knowledge graph:
 
 ```bash
-# Basic indexing
-hikma-engine embed
+# Index current directory
+hikma-engine index
+
+# Index a specific directory
+hikma-engine index /path/to/your/project
+
+# Force full indexing (ignore incremental updates)
+hikma-engine index --force-full
+
+# Skip embeddings generation (faster, but no semantic search)
+hikma-engine index --skip-embeddings
 ```
 
 ### Search Command
 
-Search your indexed codebase:
+Perform semantic search on your indexed codebase:
 
 ```bash
-# Semantic search
-hikma-engine search semantic "database connection"
+# Search in current directory
+hikma-engine search "database connection"
 
-# Text search
-hikma-engine search text "async function"
+# Search in a specific directory
+hikma-engine search "authentication logic" /path/to/your/project
+
+# Search with RAG explanation
+hikma-engine search "error handling patterns" --rag
+
+# Search with custom limits and similarity threshold
+hikma-engine search "async functions" --limit 5 --similarity 0.3
+
+# Search with custom RAG model
+hikma-engine search "configuration setup" --rag --rag-model "Qwen/Qwen2.5-Coder-7B-Instruct"
 ```
 
-### Answer Command
+## Directory Path Usage
 
-Get AI-powered answers about your codebase:
+### Using npm Scripts (Development)
+
+When working within the hikma-engine repository, you can use npm scripts with directory paths:
 
 ```bash
-# Ask questions
-hikma-engine rag "How is authentication implemented?"
+# Index a specific directory
+npm run index /path/to/your/project
+
+# Search in a specific directory
+npm run search "your query" /path/to/your/project
+
+# RAG search in a specific directory
+npm run rag "your query" /path/to/your/project
+```
+
+### Using Global CLI
+
+When hikma-engine is installed globally, you can specify directory paths:
+
+```bash
+# Index any directory from anywhere
+hikma-engine index /Users/username/my-project
+
+# Search in any indexed directory
+hikma-engine search "query" /Users/username/my-project --rag
+
+# Works with relative paths too
+hikma-engine index ../other-project
+hikma-engine search "query" ../other-project
 ```
 
 ## Embedding Providers
@@ -108,11 +150,11 @@ For better code understanding and RAG features, use the Python provider:
 npm run setup-python
 
 # Option 2: Use CLI command
-hikma --install-python-deps
+hikma-engine --install-python-deps
 
 # Option 3: Check dependencies and get setup instructions
-hikma --check-python-deps
-hikma --python-setup-help
+hikma-engine --check-python-deps
+hikma-engine --python-setup-help
 ```
 
 #### Manual Setup
@@ -132,10 +174,10 @@ python3 -c "import transformers, torch; print('Dependencies OK')"
 
 ```bash
 # Auto-install dependencies when using Python features
-hikma search semantic "authentication logic" --rag --install-python-deps
+hikma-engine search "authentication logic" --rag --install-python-deps
 
 # Check if Python environment is ready
-hikma --check-python-deps
+hikma-engine --check-python-deps
 ```
 
 ### Provider Switching
@@ -143,11 +185,11 @@ hikma --check-python-deps
 ```bash
 # Use transformers.js (default)
 export HIKMA_EMBEDDING_PROVIDER=transformers
-hikma-engine search semantic "query"
+hikma-engine search "query"
 
 # Use Python
 export HIKMA_EMBEDDING_PROVIDER=python
-hikma-engine search semantic "query"
+hikma-engine search "query"
 ```
 
 
@@ -187,23 +229,23 @@ ls -la ./data/metadata.db
 
 **No Search Results**
 ```bash
-# Check if indexing completed
-hikma-engine search stats
+# Re-run indexing to ensure completion
+hikma-engine index
 
 # Lower similarity threshold
-hikma-engine search semantic "query" --similarity 0.1
+hikma-engine search "query" --similarity 0.1
 ```
 
 **Python Provider Issues**
 ```bash
 # Check Python environment status
-hikma --check-python-deps
+hikma-engine --check-python-deps
 
 # Get detailed setup instructions
-hikma --python-setup-help
+hikma-engine --python-setup-help
 
 # Auto-install missing dependencies
-hikma --install-python-deps
+hikma-engine --install-python-deps
 
 # Manual verification
 python3 --version

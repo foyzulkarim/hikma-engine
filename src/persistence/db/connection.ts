@@ -335,8 +335,22 @@ export class SQLiteClient {
 
   private loadVectorExtension(): void {
     try {
-      const extensionPath =
-        process.env.HIKMA_SQLITE_VEC_EXTENSION || './extensions/vec0';
+      let extensionPath = process.env.HIKMA_SQLITE_VEC_EXTENSION;
+      
+      if (!extensionPath) {
+        // Try to resolve the extension path relative to the package
+        const packageRoot = path.resolve(__dirname, '../../..');
+        const localExtensionPath = path.join(packageRoot, 'extensions', 'vec0');
+        
+        // Check if the extension exists in the package directory
+        if (fs.existsSync(localExtensionPath + '.dylib') || fs.existsSync(localExtensionPath + '.so') || fs.existsSync(localExtensionPath + '.dll')) {
+          extensionPath = localExtensionPath;
+        } else {
+          // Fallback to relative path for development
+          extensionPath = './extensions/vec0';
+        }
+      }
+      
       this.db.loadExtension(extensionPath);
       this.db.prepare('SELECT vec_version()').get();
       this.vectorEnabled = true;
@@ -351,7 +365,7 @@ export class SQLiteClient {
         {
           error: errorMsg,
           extensionPath:
-            process.env.HIKMA_SQLITE_VEC_EXTENSION || './extensions/vec0',
+            process.env.HIKMA_SQLITE_VEC_EXTENSION || 'auto-resolved',
         },
       );
     }
