@@ -19,6 +19,8 @@ import {
   EmbeddingMetadataFilters,
 } from '../modules/enhanced-search-service';
 import { AnswerSynthesizer } from '../modules/answer-synthesizer';
+import { generateRAGExplanation, RAGResponse, adaptSearchResults } from '../modules/llm-rag';
+import { shutdownPythonEmbedding } from '../modules/embedding-py';
 import { ConfigManager } from '../config';
 import { initializeLogger, getLogger } from '../utils/logger';
 import { getErrorMessage, normalizeError } from '../utils/error-handling';
@@ -70,17 +72,37 @@ function handleCLIError(error: unknown, context: string): never {
     if (error.context) {
       console.error(chalk.gray(`   Context: ${error.context}`));
     }
-    process.exit(error.exitCode);
+    forceCleanExit(error.exitCode);
   } else if (error instanceof Error) {
     console.error(chalk.red(`❌ ${context}: ${error.message}`));
     if (process.env.NODE_ENV === 'development' && error.stack) {
       console.error(chalk.gray(error.stack));
     }
-    process.exit(1);
+    forceCleanExit(1);
   } else {
     console.error(chalk.red(`❌ ${context}: ${getErrorMessage(error)}`));
-    process.exit(1);
+    forceCleanExit(1);
   }
+  
+  // This should never be reached, but TypeScript requires it
+  process.exit(1);
+}
+
+/**
+ * Cleanup resources and force exit to prevent hanging
+ */
+async function forceCleanExit(exitCode: number = 0): Promise<void> {
+  try {
+    // Shut down persistent Python embedding process
+    await shutdownPythonEmbedding();
+  } catch (error) {
+    // Ignore cleanup errors
+  }
+  
+  // Force process exit after a brief delay to allow cleanup
+  setTimeout(() => {
+    process.exit(exitCode);
+  }, 100);
 }
 
 /**
@@ -149,6 +171,35 @@ function displayAnswer(answer: string) {
   console.log(chalk.gray('='.repeat(50)));
   console.log(chalk.white(answer));
   console.log(chalk.gray('='.repeat(50)));
+}
+
+/**
+ * Display RAG explanation with enhanced formatting
+ */
+function displayRAGExplanation(query: string, ragResponse: RAGResponse) {
+  const { explanation, model, device } = ragResponse;
+  
+  console.log(chalk.green('\n🧠 Code Explanation:'));
+  console.log(chalk.gray('='.repeat(60)));
+  console.log(chalk.cyan(`Query: "${query}"`));
+  console.log(chalk.gray(`Model: ${model}${device ? ` (${device})` : ''}`));
+  console.log(chalk.gray('='.repeat(60)));
+  console.log();
+  
+  if (explanation) {
+    // Split explanation into paragraphs for better readability
+    const paragraphs = explanation.split('\n\n').filter(p => p.trim());
+    paragraphs.forEach((paragraph, index) => {
+      if (index > 0) console.log(); // Add spacing between paragraphs
+      console.log(chalk.white(paragraph.trim()));
+    });
+  } else {
+    console.log(chalk.yellow('No explanation generated.'));
+  }
+  
+  console.log();
+  console.log(chalk.gray('='.repeat(60)));
+  console.log(chalk.green('✨ Code explanation completed'));
 }
 
 /**
@@ -417,6 +468,15 @@ function createProgram(): Command {
       'Synthesize results into a coherent answer',
       false
     )
+    .option(
+      '--rag',
+      'Generate detailed code explanation using LLM (requires Python)',
+      false
+    )
+    .option(
+      '--rag-model <model>',
+      'Specify LLM model for RAG (default: Qwen/Qwen2.5-Coder-3B-Instruct)'
+    )
     .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
@@ -498,8 +558,37 @@ function createProgram(): Command {
         try {
           const results = await searchService.semanticSearch(query, searchOptions);
 
+          // If RAG explanation is requested
+          if (options.rag) {
+            displayProgress('Generating detailed code explanation with LLM...');
+            
+            try {
+              const ragOptions = {
+                model: options.ragModel,
+                timeout: 300000, // 5 minutes
+                maxResults: 8
+              };
+              
+              const adaptedResults = adaptSearchResults(results);
+              const ragResponse = await generateRAGExplanation(query, adaptedResults, ragOptions);
+              
+              if (ragResponse.success) {
+                displayRAGExplanation(query, ragResponse);
+              } else {
+                console.error(chalk.red(`RAG explanation failed: ${ragResponse.error}`));
+                console.log(chalk.yellow('Falling back to showing search results:'));
+                const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
+                displayResults(results, 'Semantic Search Results', format);
+              }
+            } catch (error) {
+              console.error(chalk.red(`RAG explanation error: ${getErrorMessage(error)}`));
+              console.log(chalk.yellow('Falling back to showing search results:'));
+              const format = options.displayFormat === 'markdown' ? 'markdown' : 'table';
+              displayResults(results, 'Semantic Search Results', format);
+            }
+          }
           // If answer synthesis is requested
-          if (options.answer) {
+          else if (options.answer) {
             displayProgress('Synthesizing answer from results...');
             const answerSynthesizer = new AnswerSynthesizer(config);
             console.log('results', results);
@@ -521,6 +610,9 @@ function createProgram(): Command {
           } catch (error) {
             console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
           }
+          
+          // Clean exit to prevent hanging
+          await forceCleanExit();
         }
       } catch (error) {
         handleCLIError(error, 'Semantic search failed');
@@ -635,6 +727,9 @@ function createProgram(): Command {
           } catch (error) {
             console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
           }
+          
+          // Clean exit to prevent hanging
+          await forceCleanExit();
         }
       } catch (error) {
         handleCLIError(error, 'Text search failed');
@@ -749,6 +844,9 @@ function createProgram(): Command {
           } catch (error) {
             console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
           }
+          
+          // Clean exit to prevent hanging
+          await forceCleanExit();
         }
       } catch (error) {
         handleCLIError(error, 'Hybrid search failed');
@@ -843,6 +941,9 @@ function createProgram(): Command {
           } catch (error) {
             console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
           }
+          
+          // Clean exit to prevent hanging
+          await forceCleanExit();
         }
       } catch (error) {
         handleCLIError(error, 'Stats command failed');
@@ -959,6 +1060,9 @@ function createProgram(): Command {
           } catch (error) {
             console.warn(chalk.yellow(`Warning: Failed to disconnect search service: ${getErrorMessage(error)}`));
           }
+          
+          // Clean exit to prevent hanging
+          await forceCleanExit();
         }
       } catch (error) {
         handleCLIError(error, 'Answer synthesis failed');

@@ -17,6 +17,7 @@ import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
 import { pipeline, env } from '@xenova/transformers';
+import { getCodeEmbedding } from './embedding-py';
 
 export class EmbeddingService {
   private config: ConfigManager;
@@ -75,9 +76,20 @@ export class EmbeddingService {
           aiConfig.embedding.model
         );
         this.logger.info('Transformers.js embedding model loaded successfully');
+      } else if (aiConfig.embedding.provider === 'python') {
+        // For Python provider, we don't pre-load the model
+        // The Python script handles model loading
+        this.logger.info('Using Python embedding provider', {
+          model: aiConfig.embedding.model,
+        });
+        this.model = {
+          provider: 'python',
+          model: aiConfig.embedding.model,
+        };
+        this.logger.info('Python embedding provider configured successfully');
       } else {
         throw new Error(
-          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers'`
+          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python'`
         );
       }
 
@@ -185,16 +197,18 @@ export class EmbeddingService {
   /**
    * Generates a vector embedding for a given text.
    * @param {string} text - The text to embed.
+   * @param {boolean} isQuery - Whether this text is a search query (requires special prompt for some models).
    * @returns {Promise<number[]>} The generated embedding vector.
    */
-  private async generateEmbedding(text: string): Promise<number[]> {
+  private async generateEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
     const aiConfig = this.config.getAIConfig();
 
     if (
       aiConfig.embedding.provider === 'local' &&
       this.model &&
       typeof this.model === 'object' &&
-      'provider' in this.model
+      'provider' in this.model &&
+      this.model.provider === 'local'
     ) {
       return await this.generateLMStudioEmbedding(text);
     } else if (
@@ -202,7 +216,15 @@ export class EmbeddingService {
       this.model &&
       typeof this.model === 'function'
     ) {
-      return await this.generateTransformersEmbedding(text);
+      return await this.generateTransformersEmbedding(text, isQuery);
+    } else if (
+      aiConfig.embedding.provider === 'python' &&
+      this.model &&
+      typeof this.model === 'object' &&
+      'provider' in this.model &&
+      this.model.provider === 'python'
+    ) {
+      return await this.generatePythonEmbedding(text, isQuery);
     } else {
       // Simple fallback embedding - hash-based approach
       this.logger.warn('Using fallback hash-based embedding generation', {
@@ -211,8 +233,11 @@ export class EmbeddingService {
         modelLoaded: !!this.model,
       });
       const hash = this.simpleHash(text);
+      // Use the correct dimensions for the configured model
+      const stats = await this.getStats();
+      const dimensions = stats.dimensions;
       return Array.from(
-        { length: 384 },
+        { length: dimensions },
         (_, i) => (hash[i % hash.length] / 255) * 2 - 1
       );
     }
@@ -286,17 +311,30 @@ export class EmbeddingService {
   /**
    * Generates embedding using transformers.js pipeline.
    * @param {string} text - The text to generate an embedding for.
+   * @param {boolean} isQuery - Whether this text is a search query.
    * @returns {Promise<number[]>} The generated embedding vector.
    */
-  private async generateTransformersEmbedding(text: string): Promise<number[]> {
+  private async generateTransformersEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
     try {
+      const aiConfig = this.config.getAIConfig();
+      
+      // Apply query prompt for specific models that require it
+      let processedText = text;
+      if (isQuery && aiConfig.embedding.model === 'mixedbread-ai/mxbai-embed-large-v1') {
+        processedText = `Represent this sentence for searching relevant passages: ${text}`;
+      }
+
       this.logger.debug('Generating embedding via transformers.js', {
-        textLength: text.length,
+        textLength: processedText.length,
+        isQuery,
+        hasPrompt: processedText !== text,
       });
 
       // Generate embedding using the loaded pipeline
-      const result = await (this.model as any)(text, {
-        pooling: 'mean',
+      // Use 'cls' pooling for mixedbread-ai model as recommended in their docs
+      const poolingStrategy = aiConfig.embedding.model === 'mixedbread-ai/mxbai-embed-large-v1' ? 'cls' : 'mean';
+      const result = await (this.model as any)(processedText, {
+        pooling: poolingStrategy,
         normalize: true,
       });
 
@@ -322,6 +360,37 @@ export class EmbeddingService {
       });
       throw new Error(
         `Transformers.js embedding generation failed: ${getErrorMessage(error)}`
+      );
+    }
+  }
+
+  /**
+   * Generates embedding using Python script.
+   * @param {string} text - The text to generate an embedding for.
+   * @param {boolean} isQuery - Whether this text is a search query.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  private async generatePythonEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
+    try {
+      this.logger.debug('Generating embedding via Python script', {
+        textLength: text.length,
+        isQuery,
+      });
+
+      const embedding = await getCodeEmbedding(text, isQuery);
+
+      this.logger.debug('Python embedding generated successfully', {
+        embeddingLength: embedding.length,
+      });
+
+      return embedding;
+    } catch (error) {
+      this.logger.error('Failed to generate embedding via Python script', {
+        error: getErrorMessage(error),
+        textLength: text.length,
+      });
+      throw new Error(
+        `Python embedding generation failed: ${getErrorMessage(error)}`
       );
     }
   }
@@ -518,7 +587,7 @@ export class EmbeddingService {
       await this.loadModel();
     }
 
-    return await this.generateEmbedding(query);
+    return await this.generateEmbedding(query, true);
   }
 
   /**
@@ -584,6 +653,24 @@ export class EmbeddingService {
   }
 
   /**
+   * Generates an embedding for a search query.
+   * @param {string} query - The search query text.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  async generateQueryEmbedding(query: string): Promise<number[]> {
+    return await this.generateEmbedding(query, true);
+  }
+
+  /**
+   * Generates an embedding for document content.
+   * @param {string} text - The document text.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  async generateDocumentEmbedding(text: string): Promise<number[]> {
+    return await this.generateEmbedding(text, false);
+  }
+
+  /**
    * Gets embedding service statistics.
    * @returns {Promise<{modelLoaded: boolean, model: string, dimensions: number}>}
    */
@@ -602,6 +689,8 @@ export class EmbeddingService {
       'Xenova/distilbert-base-uncased': 768,
       'sentence-transformers/all-MiniLM-L6-v2': 384,
       'sentence-transformers/all-mpnet-base-v2': 768,
+      'mixedbread-ai/mxbai-embed-large-v1': 1024,
+      'jinaai/jina-embeddings-v2-base-code': 768,
     };
 
     const modelName = aiConfig.embedding.model;
