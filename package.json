@@ -1,6 +1,6 @@
 {
   "name": "hikma-engine",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "Code Knowledge Graph Indexer - A sophisticated TypeScript-based indexer that transforms Git repositories into multi-dimensional knowledge stores for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,7 +13,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "src/python/",
-    "scripts/setup-python.js"
+    "scripts/setup-python.js",
+    "extensions/"
   ],
   "repository": {
     "type": "git",
@@ -24,16 +25,15 @@
     "url": "https://github.com/foyzulkarim/hikma-engine/issues"
   },
   "scripts": {
-    "embed": "ts-node src/cli/main.ts index",
-    "search": "ts-node src/cli/main.ts search semantic",
-    "rag": "ts-node src/cli/main.ts search semantic",
+    "index": "ts-node src/cli/main.ts index",
+    "search": "ts-node src/cli/main.ts search",
+    "rag": "ts-node src/cli/main.ts search --rag",
     "build": "tsc",
     "prepublishOnly": "npm run clean && npm run build",
     "test": "jest",
     "clean": "rm -rf dist data/*.db",
     "setup-python": "node scripts/setup-python.js",
-    "check-python": "node scripts/setup-python.js --instructions",
-    "postinstall": "node -e \"console.log('\\n🐍 For Python-based features (embeddings, RAG), run: npm run setup-python\\n💡 Or use: hikma --python-setup-help\\n');\""
+    "postinstall": "node -e \"console.log('\\n🐍 For Python-based features (embeddings, RAG), run: npm run setup-python\\n');\""
   },
   "keywords": [
     "code-analysis",
