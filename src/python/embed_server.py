@@ -28,7 +28,7 @@ def setup_model():
         # Determine device (cuda or mps or cpu)
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
-        print(json.dumps({"model": MODEL_NAME, "device": device}), flush=True)
+        # print(json.dumps({"model": MODEL_NAME, "device": device}), flush=True)
         
         # Load tokenizer and model
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
