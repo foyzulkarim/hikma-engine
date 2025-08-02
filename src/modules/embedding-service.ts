@@ -17,6 +17,7 @@ import { ConfigManager } from '../config';
 import { getLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
 import { pipeline, env } from '@xenova/transformers';
+import { getCodeEmbedding } from './embedding-py';
 
 export class EmbeddingService {
   private config: ConfigManager;
@@ -75,9 +76,20 @@ export class EmbeddingService {
           aiConfig.embedding.model
         );
         this.logger.info('Transformers.js embedding model loaded successfully');
+      } else if (aiConfig.embedding.provider === 'python') {
+        // For Python provider, we don't pre-load the model
+        // The Python script handles model loading
+        this.logger.info('Using Python embedding provider', {
+          model: aiConfig.embedding.model,
+        });
+        this.model = {
+          provider: 'python',
+          model: aiConfig.embedding.model,
+        };
+        this.logger.info('Python embedding provider configured successfully');
       } else {
         throw new Error(
-          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers'`
+          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python'`
         );
       }
 
@@ -195,7 +207,8 @@ export class EmbeddingService {
       aiConfig.embedding.provider === 'local' &&
       this.model &&
       typeof this.model === 'object' &&
-      'provider' in this.model
+      'provider' in this.model &&
+      this.model.provider === 'local'
     ) {
       return await this.generateLMStudioEmbedding(text);
     } else if (
@@ -204,6 +217,14 @@ export class EmbeddingService {
       typeof this.model === 'function'
     ) {
       return await this.generateTransformersEmbedding(text, isQuery);
+    } else if (
+      aiConfig.embedding.provider === 'python' &&
+      this.model &&
+      typeof this.model === 'object' &&
+      'provider' in this.model &&
+      this.model.provider === 'python'
+    ) {
+      return await this.generatePythonEmbedding(text, isQuery);
     } else {
       // Simple fallback embedding - hash-based approach
       this.logger.warn('Using fallback hash-based embedding generation', {
@@ -339,6 +360,37 @@ export class EmbeddingService {
       });
       throw new Error(
         `Transformers.js embedding generation failed: ${getErrorMessage(error)}`
+      );
+    }
+  }
+
+  /**
+   * Generates embedding using Python script.
+   * @param {string} text - The text to generate an embedding for.
+   * @param {boolean} isQuery - Whether this text is a search query.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  private async generatePythonEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
+    try {
+      this.logger.debug('Generating embedding via Python script', {
+        textLength: text.length,
+        isQuery,
+      });
+
+      const embedding = await getCodeEmbedding(text, isQuery);
+
+      this.logger.debug('Python embedding generated successfully', {
+        embeddingLength: embedding.length,
+      });
+
+      return embedding;
+    } catch (error) {
+      this.logger.error('Failed to generate embedding via Python script', {
+        error: getErrorMessage(error),
+        textLength: text.length,
+      });
+      throw new Error(
+        `Python embedding generation failed: ${getErrorMessage(error)}`
       );
     }
   }

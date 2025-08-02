@@ -8,7 +8,8 @@ A sophisticated TypeScript-based code knowledge graph indexer that transforms Gi
 - **AST-based code structure extraction**: Deep understanding of code relationships
 - **Git integration**: Commit history analysis and incremental updates
 - **AI-enhanced summaries**: Intelligent file and directory summarization
-- **Vector embeddings**: Semantic similarity search capabilities
+- **Vector embeddings**: Semantic similarity search capabilities with multiple providers
+- **Python ML integration**: Advanced embedding models via Python bridge (Node.js ↔ Python)
 - **Multi-repository support**: Index and search across multiple repositories
 - **Unified CLI**: Single `hikma` command for all operations
 - **Polyglot persistence**: SQLite with sqlite-vec for unified storage
@@ -24,8 +25,9 @@ npm install
 ### Prerequisites
 
 - Node.js >= 18.0.0
-- SQLite with sqlite-vec extension
+- SQLite with sqlite-vec extension  
 - Git repository for indexing
+- Python 3.7+ (optional, for Python embedding provider)
 
 ### Environment Setup
 
@@ -38,7 +40,147 @@ HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
 
 # Logging
 HIKMA_LOG_LEVEL=info
+
+# Embedding provider (optional)
+# HIKMA_EMBEDDING_PROVIDER=python  # Options: transformers, python, local
 ```
+
+## 🐍 Python Embedding Integration
+
+Hikma Engine now supports Python-based embedding generation, allowing you to leverage powerful Python ML models directly from your Node.js application without network dependencies.
+
+### Available Embedding Providers
+
+| Provider | Description | Use Case | Setup Required |
+|----------|-------------|----------|----------------|
+| `transformers` | JavaScript-based embeddings via @xenova/transformers | Production, simple setup | None (default) |
+| `python` | Python-based embeddings with full ML ecosystem | Advanced models, better code understanding | Python + pip dependencies |
+| `local` | LM Studio server for GUI-based model management | Development, experimentation | LM Studio running |
+
+### Python Provider Setup
+
+#### 1. Install Python Dependencies
+
+```bash
+cd src/python
+pip3 install -r requirements.txt
+```
+
+#### 2. Configure Provider
+
+The Python provider can be enabled by updating your configuration or using environment variables:
+
+**Option A: Environment Variable**
+```bash
+export HIKMA_EMBEDDING_PROVIDER=python
+```
+
+**Option B: Configuration File**
+Update `src/config/index.ts` to set `provider: 'python'` in the AI embedding configuration.
+
+#### 3. Verify Setup
+
+Test the Python integration:
+```bash
+echo '{"text": "function test() { return 42; }", "is_query": false}' | python3 src/python/embed.py
+```
+
+### Python Provider Benefits
+
+✅ **Better Code Understanding**: Uses advanced models specifically trained for code  
+✅ **Full Python Ecosystem**: Access to any Python-based embedding model  
+✅ **No Network Calls**: All processing happens locally  
+✅ **Same Model Consistency**: Uses `mixedbread-ai/mxbai-embed-large-v1` for optimal results  
+✅ **Query Optimization**: Automatic prompt application for search queries vs documents  
+
+### Performance Characteristics
+
+- **First Run**: 3-10 seconds (model download + loading)
+- **Subsequent Runs**: 1-2 seconds (model cached)
+- **Per Embedding**: 100-300ms depending on text length
+- **Memory Usage**: ~1-2GB RAM during operation
+- **Model Size**: ~670MB (cached after first download)
+
+### Usage Examples
+
+Once configured, the Python provider works seamlessly with existing commands:
+
+```bash
+# Indexing with Python embeddings
+npm run hikma index
+
+# Searching with Python embeddings
+npm run hikma search semantic "authentication functions"
+
+# All existing functionality works the same
+npm run hikma search hybrid "user validation" --type function
+```
+
+### Provider Switching
+
+You can switch between providers at runtime:
+
+```bash
+# Use transformers.js (JavaScript)
+export HIKMA_EMBEDDING_PROVIDER=transformers
+npm run hikma search semantic "query"
+
+# Use Python
+export HIKMA_EMBEDDING_PROVIDER=python
+npm run hikma search semantic "query"
+
+# Use local LM Studio
+export HIKMA_EMBEDDING_PROVIDER=local
+npm run hikma search semantic "query"
+```
+
+### Troubleshooting Python Provider
+
+**Python not found:**
+```bash
+python3 --version
+which python3
+```
+
+**Dependencies missing:**
+```bash
+cd src/python
+pip3 install -r requirements.txt
+```
+
+**Model download issues:**
+```bash
+# Test model access
+python3 -c "from transformers import AutoModel; AutoModel.from_pretrained('mixedbread-ai/mxbai-embed-large-v1')"
+```
+
+**Performance issues:**
+- Increase timeout in `src/modules/embedding-py.ts` if needed
+- Ensure sufficient RAM (2GB+ recommended)
+- Check Python process isn't being killed by system
+
+### Advanced Python Integration
+
+For direct Python interface usage in custom applications:
+
+```typescript
+import { 
+  getCodeEmbedding, 
+  getPythonQueryEmbedding, 
+  getPythonDocumentEmbedding 
+} from './src/modules/embedding-py';
+
+// Basic usage
+const embedding = await getCodeEmbedding("const x = 42;", false);
+
+// Query embedding (with search prompt)
+const queryEmbedding = await getPythonQueryEmbedding("find variable declaration");
+
+// Document embedding (without prompt)
+const docEmbedding = await getPythonDocumentEmbedding("const x = 42;");
+```
+
+See `PYTHON-EMBEDDING-GUIDE.md` for detailed integration documentation.
 
 ## CLI Usage
 

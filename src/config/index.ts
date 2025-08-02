@@ -16,7 +16,7 @@ export interface AIConfig {
   embedding: {
     model: string;
     batchSize: number;
-    provider: 'local' | 'transformers';
+    provider: 'local' | 'transformers' | 'python';
     localEndpoint?: string;
   };
   summary: {
@@ -56,9 +56,9 @@ const defaultConfig: AppConfig = {
   },
   ai: {
     embedding: {
-      model: 'mixedbread-ai/mxbai-embed-large-v1',
+      model: 'Qwen/Qwen3-Embedding-8B',
       batchSize: 32,
-      provider: 'transformers',
+      provider: 'python',
       localEndpoint: 'http://localhost:1234',
     },
     summary: {
