@@ -99,18 +99,43 @@ Hikma Engine supports three embedding providers:
 
 ### Python Provider Setup
 
-For better code understanding, use the Python provider:
+For better code understanding and RAG features, use the Python provider:
+
+#### Automatic Setup (Recommended)
 
 ```bash
-# Install Python dependencies
-cd /src/python
-pip3 install -r requirements.txt
+# Option 1: Use npm script (after installing hikma-engine)
+npm run setup-python
+
+# Option 2: Use CLI command
+hikma --install-python-deps
+
+# Option 3: Check dependencies and get setup instructions
+hikma --check-python-deps
+hikma --python-setup-help
+```
+
+#### Manual Setup
+
+```bash
+# Install Python dependencies manually
+pip3 install transformers torch accelerate
 
 # Configure provider (Optional)
 export HIKMA_EMBEDDING_PROVIDER=python
 
-# Test setup
-echo '{"text": "function test() { return 42; }", "is_query": false}' | python3 node_modules/hikma-engine/src/python/embed.py
+# Verify setup
+python3 -c "import transformers, torch; print('Dependencies OK')"
+```
+
+#### Using with CLI Commands
+
+```bash
+# Auto-install dependencies when using Python features
+hikma search semantic "authentication logic" --rag --install-python-deps
+
+# Check if Python environment is ready
+hikma --check-python-deps
 ```
 
 ### Provider Switching
@@ -171,10 +196,21 @@ hikma-engine search semantic "query" --similarity 0.1
 
 **Python Provider Issues**
 ```bash
-# Verify Python setup
+# Check Python environment status
+hikma --check-python-deps
+
+# Get detailed setup instructions
+hikma --python-setup-help
+
+# Auto-install missing dependencies
+hikma --install-python-deps
+
+# Manual verification
 python3 --version
-cd node_modules/hikma-engine/src/python
-pip3 install -r requirements.txt
+python3 -c "import transformers, torch, accelerate; print('All dependencies OK')"
+
+# Alternative setup using npm
+npm run setup-python
 ```
 
 ### Debug Mode

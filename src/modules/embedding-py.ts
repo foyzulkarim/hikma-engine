@@ -2,6 +2,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { getLogger } from '../utils/logger';
+import { ensurePythonDependencies } from '../utils/python-dependency-checker';
 
 export interface PythonEmbeddingResult {
     embedding: number[];
@@ -42,6 +43,9 @@ class PersistentPythonEmbedding {
 
         this.logger.info('Starting persistent Python embedding process...');
         
+        // Check Python dependencies before starting
+        await ensurePythonDependencies(false, false);
+        
         // Get model name from config
         const { ConfigManager } = await import('../config');
         const config = new ConfigManager(process.cwd());
@@ -50,17 +54,29 @@ class PersistentPythonEmbedding {
         
         this.logger.info('Using Python embedding model', { model: modelName });
         
+        // Python script is in src directory, not dist
+        const projectRoot = path.resolve(__dirname, '..', '..');
+        const scriptPath = path.join(projectRoot, 'src', 'python', 'embed_server.py');
+        const workingDir = projectRoot;
+        this.logger.info('Python script details', { scriptPath, workingDir, modelName });
+        
         this.process = spawn('python3', [
-            path.join(__dirname, '..', 'python', 'embed_server.py'),
+            scriptPath,
             modelName  // Pass model name as argument
         ], {
-            cwd: path.join(__dirname, '..'),
+            cwd: workingDir,
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
         if (!this.process.stdout || !this.process.stderr || !this.process.stdin) {
             throw new Error('Failed to create Python process with proper stdio');
         }
+
+        // Handle stdin errors (like EPIPE)
+        this.process.stdin.on('error', (error) => {
+            this.logger.warn('Python process stdin error', { error: error.message });
+            // Don't throw here, just log the error
+        });
 
         // Handle process exit
         this.process.on('exit', (code) => {
@@ -97,11 +113,13 @@ class PersistentPythonEmbedding {
 
         // Handle stderr
         this.process.stderr.on('data', (data: Buffer) => {
-            const errorText = data.toString();
-            if (errorText.includes('ERROR')) {
-                this.logger.error('Python process stderr', { error: errorText });
-            } else {
-                this.logger.debug('Python process stderr', { message: errorText });
+            const errorText = data.toString().trim();
+            if (errorText) {
+                this.logger.warn('Python process stderr', { message: errorText });
+                // If we see any stderr output, it might indicate an issue
+                if (errorText.includes('ERROR') || errorText.includes('Exception') || errorText.includes('Traceback')) {
+                    this.logger.error('Python process error detected', { error: errorText });
+                }
             }
         });
 
@@ -187,11 +205,16 @@ class PersistentPythonEmbedding {
             };
 
             try {
-                this.process!.stdin!.write(JSON.stringify(request) + '\n');
+                const success = this.process!.stdin!.write(JSON.stringify(request) + '\n');
+                if (!success) {
+                    this.logger.warn('Python stdin buffer full, waiting for drain');
+                }
             } catch (error) {
                 clearTimeout(timeout);
                 this.pendingRequests.delete(id);
-                reject(new Error(`Failed to send request to Python: ${error}`));
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                this.logger.error('Failed to write to Python process', { error: errorMessage });
+                reject(new Error(`Failed to send request to Python: ${errorMessage}`));
             }
         });
     }
