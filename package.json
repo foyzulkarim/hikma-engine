@@ -2,50 +2,34 @@
   "name": "hikma-engine",
   "version": "2.0.0",
   "description": "Code Knowledge Graph Indexer - A sophisticated TypeScript-based indexer that transforms Git repositories into multi-dimensional knowledge stores for AI agents",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hikma-engine": "dist/cli/main.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "src/python/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foyzulkarim/hikma-engine.git"
+  },
+  "homepage": "https://github.com/foyzulkarim/hikma-engine#readme",
+  "bugs": {
+    "url": "https://github.com/foyzulkarim/hikma-engine/issues"
+  },
   "scripts": {
-    "start": "ts-node src/index.ts",
-    "api": "ts-node src/api/index.ts",
-    "api:dev": "ts-node src/api/index.ts",
-    "hikma": "ts-node src/cli/main.ts",
-    "index": "ts-node src/cli/main.ts index",
-    "answer": "ts-node src/cli/main.ts answer",
-    "search": "ts-node src/cli/main.ts search",
-    "graph-query": "ts-node src/cli/graph-query.ts",
+    "embed": "ts-node src/cli/main.ts index",
+    "search": "ts-node src/cli/main.ts search semantic",
+    "rag": "ts-node src/cli/main.ts answer",
     "build": "tsc",
-    "dev": "ts-node src/index.ts",
+    "prepublishOnly": "npm run clean && npm run build && npm test",
     "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:integration": "jest --config jest.integration.config.js",
-    "test:performance": "jest --config jest.performance.config.js",
-    "test:system": "jest --config jest.system.config.js",
-    "test:lm-studio": "ts-node tests/lm-studio-embedding.test.ts",
-    "test:transformers": "ts-node tests/transformers-embedding.test.ts",
-    "embed:files": "ts-node scripts/generate-file-embeddings.ts",
-    "embed:graph-nodes": "ts-node scripts/generate-graph-node-embeddings.ts",
-    "example:embeddings": "ts-node examples/file-embedding-example.ts",
-    "example:graph-embeddings": "ts-node examples/graph-node-embedding-example.ts",
-    "example:enhanced-search": "ts-node examples/enhanced-search-example.ts",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "clean": "rm -rf dist data/*.db",
-    "api:start": "node dist/api/server.js",
-    "api:build": "tsc",
-    "api:test": "jest src/api",
-    "api:test:integration": "jest src/api/tests/integration",
-    "api:test:performance": "jest src/api/tests/performance",
-    "deploy:dev": "./scripts/deploy.sh development",
-    "deploy:staging": "./scripts/deploy.sh staging",
-    "deploy:prod": "./scripts/deploy.sh production",
-    "performance:test": "./scripts/performance-test.sh",
-    "production:check": "./scripts/production-readiness.sh",
-    "docker:build": "docker build -f Dockerfile.api -t hikma-api .",
-    "docker:run": "docker-compose up -d",
-    "docker:dev": "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d",
-    "docker:stop": "docker-compose down",
-    "k8s:deploy": "kubectl apply -f k8s/",
-    "k8s:delete": "kubectl delete -f k8s/"
+    "clean": "rm -rf dist data/*.db"
   },
   "keywords": [
     "code-analysis",
@@ -57,7 +41,7 @@
     "typescript",
     "polyglot-persistence"
   ],
-  "author": "hikma-engine contributors",
+  "author": "foyzulkarim",
   "license": "MIT",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.10",
@@ -109,6 +93,6 @@
     "zod": "^4.0.5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }

@@ -1,0 +1,62 @@
+# Source files (only dist/ should be included)
+src/
+tsconfig.json
+jest.config.js
+
+# Development files
+.env
+.env.*
+*.log
+
+# Test files
+tests/
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+
+# Development configurations
+.eslintrc*
+.prettierrc*
+.vscode/
+.idea/
+
+# Docker files
+docker-compose*.yml
+Dockerfile*
+k8s/
+
+# Scripts
+scripts/
+
+# Data and temp files
+data/
+hikma/
+*.db
+*.db.backup
+
+# Extensions
+extensions/
+
+# Documentation (except README)
+docs/
+DOCKER-USAGE.md
+
+# Load tests
+load-tests/
+
+# Examples (they'll be in the repository, not needed in package)
+examples/
+
+# Git files
+.git/
+.gitignore
+
+# CI/CD
+.github/
+
+# Node modules
+node_modules/
+
+# Build artifacts (except dist/)
+*.tsbuildinfo

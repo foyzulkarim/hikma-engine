@@ -240,4 +240,14 @@ if (require.main === module) {
   main();
 }
 
+// Export main classes and interfaces for library usage
+export { Indexer } from './core/indexer';
+export type { IndexingOptions } from './core/indexer';
+export { EnhancedSearchService } from './modules/enhanced-search-service';
+export { SearchService } from './modules/search-service';
+export * from './types';
+export * from './config';
+
+// Export main CLI class for programmatic usage
+export { HikmaEngineCLI };
 
