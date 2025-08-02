@@ -14,7 +14,8 @@ import queue
 import signal
 
 # Global model and tokenizer
-MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"  # Default model
+# MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"  # Default model
+MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"
 tokenizer = None
 model = None
 device = None
@@ -24,8 +25,10 @@ def setup_model():
     global tokenizer, model, device
     
     try:
-        # Determine device
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Determine device (cuda or mps or cpu)
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
+        print(json.dumps({"model": MODEL_NAME, "device": device}), flush=True)
         
         # Load tokenizer and model
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)

@@ -56,7 +56,8 @@ const defaultConfig: AppConfig = {
   },
   ai: {
     embedding: {
-      model: 'Qwen/Qwen3-Embedding-8B',
+      // model: 'Qwen/Qwen3-Embedding-0.6B',
+      model: 'mixedbread-ai/mxbai-embed-large-v1',
       batchSize: 32,
       provider: 'python',
       localEndpoint: 'http://localhost:1234',
