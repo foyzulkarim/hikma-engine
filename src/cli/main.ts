@@ -236,6 +236,8 @@ function createProgram(): Command {
             console.log(chalk.yellow(`  - ${error}`))
           );
         }
+
+        await forceCleanExit(0);
       } catch (error) {
         handleCLIError(error, 'Indexing failed');
       }
