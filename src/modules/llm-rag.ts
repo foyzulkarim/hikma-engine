@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { getLogger } from '../utils/logger';
 import { ensurePythonDependencies } from '../utils/python-dependency-checker';
+import { getConfig } from '../config';
 
 export interface RAGResponse {
   success: boolean;
@@ -42,8 +43,17 @@ export interface RAGOptions {
   maxResults?: number;
 }
 
-const DEFAULT_MODEL = 'Qwen/Qwen2.5-Coder-3B-Instruct';
 const DEFAULT_TIMEOUT = 300000; // 5 minutes
+
+// Get the default RAG model from configuration
+function getDefaultModel(): string {
+  try {
+    return getConfig().getAIConfig().rag.model;
+  } catch {
+    // Fallback to hardcoded value if config is not available
+    return 'Qwen/Qwen2.5-Coder-3B-Instruct';
+  }
+}
 
 class LLMRAGService {
   private logger = getLogger('LLMRAGService');
@@ -58,7 +68,7 @@ class LLMRAGService {
     options: RAGOptions = {}
   ): Promise<RAGResponse> {
     const {
-      model = DEFAULT_MODEL,
+      model = getDefaultModel(),
       timeout = DEFAULT_TIMEOUT,
       maxResults = 8
     } = options;

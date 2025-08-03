@@ -23,6 +23,9 @@ export interface AIConfig {
     model: string;
     maxTokens: number;
   };
+  rag: {
+    model: string;
+  };
 }
 
 export interface IndexingConfig {
@@ -65,6 +68,9 @@ const defaultConfig: AppConfig = {
     summary: {
       model: 'Xenova/distilgpt2',
       maxTokens: 256,
+    },
+    rag: {
+      model: 'Qwen/Qwen2.5-Coder-3B-Instruct',
     },
   },
   indexing: {
@@ -130,6 +136,13 @@ export class ConfigManager {
     }
     if (process.env.HIKMA_SQLITE_VEC_EXTENSION) {
       config.database.sqlite.vectorExtension = path.resolve(this.projectRoot, process.env.HIKMA_SQLITE_VEC_EXTENSION);
+    }
+    // Override AI model configuration
+    if (process.env.HIKMA_EMBEDDING_MODEL) {
+      config.ai.embedding.model = process.env.HIKMA_EMBEDDING_MODEL;
+    }
+    if (process.env.HIKMA_RAG_MODEL) {
+      config.ai.rag.model = process.env.HIKMA_RAG_MODEL;
     }
     // Support both HIKMA_LOG_LEVEL (CLI) and HIKMA_API_LOG_LEVEL (API) environment variables
     if (process.env.HIKMA_LOG_LEVEL || process.env.HIKMA_API_LOG_LEVEL) {
