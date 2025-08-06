@@ -335,7 +335,7 @@ function createProgram(): Command {
             const ragResponse = await generateRAGExplanation(
               query,
               adaptedResults,
-              options.ragModel
+              { model: options.ragModel || config.getAIConfig().rag.model }
             );
             
             displayRAGExplanation(query, ragResponse);

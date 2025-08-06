@@ -23,8 +23,8 @@ class CodeRAGService:
         """Get the best available device for inference."""
         if torch.cuda.is_available():
             return "cuda"
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return "mps"  # Apple Silicon
+        elif torch.backends.mps.is_available():
+            return "mps"
         else:
             return "cpu"
     
