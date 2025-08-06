@@ -59,7 +59,6 @@ const defaultConfig: AppConfig = {
   },
   ai: {
     embedding: {
-      // model: 'Qwen/Qwen3-Embedding-0.6B',
       model: 'mixedbread-ai/mxbai-embed-large-v1',
       batchSize: 32,
       provider: 'python',
@@ -70,7 +69,7 @@ const defaultConfig: AppConfig = {
       maxTokens: 256,
     },
     rag: {
-      model: 'Qwen/Qwen2.5-Coder-3B-Instruct',
+      model: 'Qwen/Qwen2.5-Coder-1.5B-Instruct',
     },
   },
   indexing: {

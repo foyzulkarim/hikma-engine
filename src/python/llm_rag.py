@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import List, Dict, Any, Optional
 
 class CodeRAGService:
-    def __init__(self, model_name: str = "Qwen/Qwen2.5-Coder-3B-Instruct"):
+    def __init__(self, model_name: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct"):
         self.model_name = model_name
         self.tokenizer: Optional[AutoTokenizer] = None
         self.model: Optional[AutoModelForCausalLM] = None
@@ -208,7 +208,7 @@ def process_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Initialize service if needed
         if rag_service is None:
-            model_name = request_data.get('model', 'Qwen/Qwen2.5-Coder-3B-Instruct')
+            model_name = request_data.get('model', 'Qwen/Qwen2.5-Coder-1.5B-Instruct')
             rag_service = CodeRAGService(model_name)
             rag_service.load_model()
         

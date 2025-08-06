@@ -170,7 +170,7 @@ export class EnhancedSearchService {
 
       const results = this.sqliteClient.all(sql, params);
       
-      const searchResults: EmbeddingSearchResult[] = results.map((row: any, index: number) => ({
+      const allResults: EmbeddingSearchResult[] = results.map((row: any, index: number) => ({
         node: {
           id: row.id,
           nodeId: row.node_id,
@@ -182,6 +182,9 @@ export class EnhancedSearchService {
         similarity: 1 - row.distance, // Convert distance to similarity
         rank: index + 1
       }));
+
+      // Filter out test files
+      const searchResults = this.filterOutTestFiles(allResults);
 
       this.logger.info('Semantic search completed', {
         query: query.substring(0, 50),
@@ -238,7 +241,7 @@ export class EnhancedSearchService {
 
       const results = this.sqliteClient.all(sql, params);
       
-      return results.map((row: any, index: number) => ({
+      const allResults = results.map((row: any, index: number) => ({
         node: {
           id: row.id,
           nodeId: row.node_id,
@@ -249,6 +252,9 @@ export class EnhancedSearchService {
         similarity: 0.8, // Default similarity for text search
         rank: index + 1
       }));
+
+      // Filter out test files
+      return this.filterOutTestFiles(allResults);
     } catch (error) {
       this.logger.error('Text-based search failed', { error: getErrorMessage(error) });
       return [];
@@ -300,7 +306,7 @@ export class EnhancedSearchService {
 
       const results = this.sqliteClient.all(sql, params);
       
-      const searchResults: EmbeddingSearchResult[] = results.map((row: any, index: number) => ({
+      const allResults: EmbeddingSearchResult[] = results.map((row: any, index: number) => ({
         node: {
           id: row.id,
           nodeId: row.node_id,
@@ -311,6 +317,9 @@ export class EnhancedSearchService {
         similarity: 0.9, // High similarity for metadata matches
         rank: index + 1
       }));
+
+      // Filter out test files
+      const searchResults = this.filterOutTestFiles(allResults);
 
       this.logger.info('Metadata search completed', {
         filters,
@@ -503,7 +512,7 @@ export class EnhancedSearchService {
 
     const results = this.sqliteClient.all(sql, params);
     
-    return results.map((row: any, index: number) => ({
+    const allResults = results.map((row: any, index: number) => ({
       node: {
         id: row.id,
         nodeId: row.node_id,
@@ -514,6 +523,9 @@ export class EnhancedSearchService {
       similarity: 1 - row.distance,
       rank: index + 1
     }));
+
+    // Filter out test files
+    return this.filterOutTestFiles(allResults);
   }
 
   /**
@@ -548,6 +560,23 @@ export class EnhancedSearchService {
   private deserializeEmbedding(blob: Buffer): number[] {
     const float32Array = new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
     return Array.from(float32Array);
+  }
+
+  /**
+   * Filter out test files from search results
+   */
+  private filterOutTestFiles(results: EmbeddingSearchResult[]): EmbeddingSearchResult[] {
+    return results.filter(result => {
+      const filePath = result.node.filePath;
+      // Check if file is a test file based on common patterns
+      const isTestFile = /\.(test|spec)\.(ts|js|tsx|jsx)$/i.test(filePath) ||
+                        /\/tests?\//.test(filePath) ||
+                        /\/test\//.test(filePath) ||
+                        /\/__tests__\//.test(filePath) ||
+                        /\.test\./i.test(filePath) ||
+                        /\.spec\./i.test(filePath);
+      return !isTestFile;
+    });
   }
 
   /**

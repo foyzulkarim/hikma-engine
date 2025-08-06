@@ -5,7 +5,6 @@ import torch
 import numpy as np
 
 # Load model and tokenizer once - using the mixedbread-ai model by default
-# MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)

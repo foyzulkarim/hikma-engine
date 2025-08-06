@@ -51,7 +51,7 @@ function getDefaultModel(): string {
     return getConfig().getAIConfig().rag.model;
   } catch {
     // Fallback to hardcoded value if config is not available
-    return 'Qwen/Qwen2.5-Coder-3B-Instruct';
+    return 'Qwen/Qwen2.5-Coder-1.5B-Instruct';
   }
 }
 

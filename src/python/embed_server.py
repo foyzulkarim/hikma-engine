@@ -14,7 +14,6 @@ import queue
 import signal
 
 # Global model and tokenizer
-# MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"  # Default model
 MODEL_NAME = "mixedbread-ai/mxbai-embed-large-v1"  # Default model
 tokenizer = None
 model = None

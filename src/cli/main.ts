@@ -250,7 +250,7 @@ function createProgram(): Command {
     .option('-l, --limit <number>', 'Maximum number of results', '10')
     .option('-s, --similarity <number>', 'Minimum similarity threshold (0-1)', '0.1')
     .option('--rag', 'Generate detailed code explanation using LLM (requires Python)', false)
-    .option('--rag-model <model>', 'Specify LLM model for RAG (default: Qwen/Qwen2.5-Coder-3B-Instruct)')
+    .option('--rag-model <model>', 'Specify LLM model for RAG (default: Qwen/Qwen2.5-Coder-1.5B-Instruct)')
     .action(async (query: string, projectPath: string = process.cwd(), options: any) => {
       try {
         // Validate query
