@@ -2,9 +2,9 @@
  * @file Integration tests for API server startup and basic functionality.
  */
 
-import { createAPIServer, APIServer } from '../src/api/server';
-import { initializeConfig } from '../src/config';
-import { initializeLogger } from '../src/utils/logger';
+import { createAPIServer, APIServer } from '../server';
+import { initializeConfig } from '../../config';
+import { initializeLogger } from '../../utils/logger';
 import * as path from 'path';
 import * as http from 'http';
 

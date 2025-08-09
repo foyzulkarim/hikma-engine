@@ -2,7 +2,7 @@
  * @file Tests for the configuration management system.
  */
 
-import { ConfigManager, initializeConfig } from '../src/config';
+import { ConfigManager, initializeConfig } from './index';
 import * as path from 'path';
 
 describe('ConfigManager', () => {
