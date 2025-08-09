@@ -19,7 +19,7 @@ import {
 } from '../modules/enhanced-search-service';
 import { generateRAGExplanation, RAGResponse, adaptSearchResults } from '../modules/llm-rag';
 import { shutdownPythonEmbedding } from '../modules/embedding-py';
-import { ConfigManager } from '../config';
+import { ConfigManager, initializeConfig } from '../config';
 import { initializeLogger } from '../utils/logger';
 import { getErrorMessage } from '../utils/error-handling';
 import { ensurePythonDependencies, isPythonEnvironmentReady } from '../utils/python-dependency-checker';
@@ -200,6 +200,8 @@ function createProgram(): Command {
 
         // Initialize configuration and logging
         const config = new ConfigManager(resolvedPath);
+        // Initialize global configuration for modules that use singleton config (e.g., LLM providers)
+        initializeConfig(resolvedPath);
         const loggingConfig = config.getLoggingConfig();
         initializeLogger({
           level: loggingConfig.level,
@@ -276,6 +278,8 @@ function createProgram(): Command {
         }
 
         const config = new ConfigManager(resolvedPath);
+        // Initialize global configuration for modules that use singleton config (e.g., LLM providers)
+        initializeConfig(resolvedPath);
         const loggingConfig = config.getLoggingConfig();
         initializeLogger({
           level: loggingConfig.level,
@@ -307,24 +311,26 @@ function createProgram(): Command {
           displayProgress('Generating detailed code explanation with LLM...');
           
           try {
-            // Check if we should auto-install Python dependencies
-            const globalOptions = program.opts();
-            if (globalOptions.installPythonDeps) {
-              try {
-                await ensurePythonDependencies(true, true);
-              } catch (depError) {
-                console.log(chalk.yellow('⚠️  Failed to install Python dependencies automatically:'), getErrorMessage(depError));
-                console.log(chalk.blue('💡 Try running: npm run setup-python'));
-                throw depError;
-              }
-            } else {
-              // Check dependencies without auto-install
-              const isReady = await isPythonEnvironmentReady();
-              if (!isReady) {
-                console.log(chalk.yellow('⚠️  Python dependencies are not available for RAG feature'));
-                console.log(chalk.blue('💡 Run with --install-python-deps to install automatically, or:'));
-                console.log(chalk.cyan('   npm run setup-python'));
-                throw new Error('Python dependencies required for RAG feature');
+            // Only check Python deps if provider is python
+            const llmProvider = config.getAIConfig().llmProvider.provider;
+            if (llmProvider === 'python') {
+              const globalOptions = program.opts();
+              if (globalOptions.installPythonDeps) {
+                try {
+                  await ensurePythonDependencies(true, true);
+                } catch (depError) {
+                  console.log(chalk.yellow('⚠️  Failed to install Python dependencies automatically:'), getErrorMessage(depError));
+                  console.log(chalk.blue('💡 Try running: npm run setup-python'));
+                  throw depError;
+                }
+              } else {
+                const isReady = await isPythonEnvironmentReady();
+                if (!isReady) {
+                  console.log(chalk.yellow('⚠️  Python dependencies are not available for RAG feature'));
+                  console.log(chalk.blue('💡 Run with --install-python-deps to install automatically, or:'));
+                  console.log(chalk.cyan('   npm run setup-python'));
+                  throw new Error('Python dependencies required for RAG feature');
+                }
               }
             }
 

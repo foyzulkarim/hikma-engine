@@ -8,6 +8,7 @@ import * as path from 'path';
 import { getLogger } from '../utils/logger';
 import { ensurePythonDependencies } from '../utils/python-dependency-checker';
 import { getConfig } from '../config';
+import { LLMProviderManager } from './llm-providers';
 
 export interface RAGResponse {
   success: boolean;
@@ -15,6 +16,15 @@ export interface RAGResponse {
   error?: string;
   model: string;
   device?: string;
+  // Additional metadata for external providers
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  responseId?: string;
+  finishReason?: string;
+  [key: string]: any; // Allow additional provider-specific metadata
 }
 
 export interface SearchResult {
@@ -41,6 +51,7 @@ export interface RAGOptions {
   model?: string;
   timeout?: number;
   maxResults?: number;
+  maxTokens?: number; // For external providers like OpenAI
 }
 
 const DEFAULT_TIMEOUT = 300000; // 5 minutes
@@ -61,8 +72,71 @@ class LLMRAGService {
 
   /**
    * Generate an explanation using LLM-based RAG
+   * Now delegates to the provider manager for consistency
    */
   async generateExplanation(
+    query: string,
+    searchResults: SearchResult[],
+    options: RAGOptions = {}
+  ): Promise<RAGResponse> {
+    const operation = this.logger.operation(`RAG explanation for: "${query.substring(0, 50)}..."`);
+
+    try {
+      this.logger.info('LLMRAGService delegating to provider manager', {
+        query: query.substring(0, 100),
+        resultCount: searchResults.length,
+        options
+      });
+
+      // Delegate to provider manager for consistent behavior
+      const result = await providerManager.generateExplanation(query, searchResults, options);
+      
+      operation();
+      return result;
+
+    } catch (error) {
+      operation();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      this.logger.error('LLMRAGService explanation error', {
+        error: errorMessage
+      });
+      
+      // If provider manager fails completely, try direct Python execution as last resort
+      if (errorMessage.includes('No healthy providers available') || 
+          errorMessage.includes('All providers failed')) {
+        
+        this.logger.warn('Provider manager has no healthy providers, attempting direct Python execution');
+        
+        try {
+          return await this.executePythonRAGDirect(query, searchResults, options);
+        } catch (pythonError) {
+          const pythonErrorMessage = pythonError instanceof Error ? pythonError.message : String(pythonError);
+          this.logger.error('Direct Python execution also failed', {
+            error: pythonErrorMessage
+          });
+          
+          return {
+            success: false,
+            error: `All RAG methods failed. Provider manager: ${errorMessage}. Direct Python: ${pythonErrorMessage}`,
+            model: options.model || getDefaultModel()
+          };
+        }
+      }
+      
+      return {
+        success: false,
+        error: errorMessage,
+        model: options.model || getDefaultModel()
+      };
+    }
+  }
+
+  /**
+   * Direct Python execution as absolute last resort
+   * This maintains the original Python execution logic for emergency fallback
+   */
+  private async executePythonRAGDirect(
     query: string,
     searchResults: SearchResult[],
     options: RAGOptions = {}
@@ -73,12 +147,18 @@ class LLMRAGService {
       maxResults = 8
     } = options;
 
-    const operation = this.logger.operation(`RAG explanation for: "${query.substring(0, 50)}..."`);
-
     try {
-      // Check Python dependencies before starting
-      await ensurePythonDependencies(false, false);
-      this.logger.info('Starting RAG explanation generation', {
+      // Only check Python dependencies if the configured provider is python
+      try {
+        const provider = getConfig().getAIConfig().llmProvider.provider;
+        if (provider === 'python') {
+          await ensurePythonDependencies(false, false);
+        }
+      } catch {
+        // If config isn't available, skip implicit python deps check
+      }
+      
+      this.logger.info('Starting direct Python RAG execution', {
         query: query.substring(0, 100),
         resultCount: searchResults.length,
         model,
@@ -92,23 +172,21 @@ class LLMRAGService {
       const result = await this.executePythonRAG(query, limitedResults, model, timeout);
 
       if (result.success) {
-        this.logger.info('RAG explanation generated successfully', {
+        this.logger.info('Direct Python RAG explanation generated successfully', {
           model: result.model,
           device: result.device,
           explanationLength: result.explanation?.length || 0
         });
       } else {
-        this.logger.warn('RAG explanation failed', {
+        this.logger.warn('Direct Python RAG explanation failed', {
           error: result.error,
           model: result.model
         });
       }
 
-      operation();
       return result;
 
     } catch (error) {
-      operation();
       const errorMessage = error instanceof Error ? error.message : String(error);
       
       // Check if this is a Python dependency error
@@ -121,7 +199,7 @@ class LLMRAGService {
         };
       }
       
-      this.logger.error('RAG explanation error', {
+      this.logger.error('Direct Python RAG explanation error', {
         error: errorMessage
       });
       
@@ -289,44 +367,78 @@ class LLMRAGService {
 
   /**
    * Cleanup any running processes
+   * Now also handles provider manager cleanup
    */
   async cleanup(): Promise<void> {
+    const cleanupPromises: Promise<void>[] = [];
+
+    // Cleanup active Python process if any
     if (this.activeProcess && !this.activeProcess.killed) {
       this.logger.info('Cleaning up active Python RAG process');
       this.activeProcess.kill('SIGTERM');
       
       // Wait a bit, then force kill if necessary
-      setTimeout(() => {
-        if (this.activeProcess && !this.activeProcess.killed) {
-          this.activeProcess.kill('SIGKILL');
+      const processCleanup = new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          if (this.activeProcess && !this.activeProcess.killed) {
+            this.activeProcess.kill('SIGKILL');
+          }
+          resolve();
+        }, 5000);
+
+        if (this.activeProcess) {
+          this.activeProcess.on('exit', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        } else {
+          clearTimeout(timeout);
+          resolve();
         }
-      }, 5000);
+      });
+
+      cleanupPromises.push(processCleanup);
     }
+
+    // Wait for all cleanup operations
+    await Promise.allSettled(cleanupPromises);
+    this.logger.info('LLMRAGService cleanup completed');
   }
 }
 
-// Global service instance
+// Global service instances
 const ragService = new LLMRAGService();
+const providerManager = new LLMProviderManager();
 
 // Cleanup on process exit
 process.on('exit', () => {
-  ragService.cleanup().catch(() => {
+  Promise.allSettled([
+    ragService.cleanup(),
+    providerManager.cleanup()
+  ]).catch(() => {
     // Ignore cleanup errors on exit
   });
 });
 
 process.on('SIGINT', async () => {
-  await ragService.cleanup();
+  await Promise.allSettled([
+    ragService.cleanup(),
+    providerManager.cleanup()
+  ]);
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  await ragService.cleanup();
+  await Promise.allSettled([
+    ragService.cleanup(),
+    providerManager.cleanup()
+  ]);
   process.exit(0);
 });
 
 /**
  * Generate an explanation for search results using LLM-based RAG
+ * Uses the configurable provider system with intelligent fallback
  * 
  * @param query - The original search query
  * @param searchResults - Array of search results to explain
@@ -338,12 +450,69 @@ export async function generateRAGExplanation(
   searchResults: SearchResult[],
   options: RAGOptions = {}
 ): Promise<RAGResponse> {
-  return ragService.generateExplanation(query, searchResults, options);
+  const logger = getLogger('generateRAGExplanation');
+  const operation = logger.operation(`RAG explanation for: "${query.substring(0, 50)}..."`);
+  
+  try {
+    // Use the provider manager for all requests
+    logger.debug('Generating explanation with provider manager', {
+      queryLength: query.length,
+      resultCount: searchResults.length,
+      options
+    });
+    
+    const result = await providerManager.generateExplanation(query, searchResults, options);
+    
+    operation();
+    logger.info('RAG explanation completed successfully', {
+      provider: result.provider || 'unknown',
+      explanationLength: result.explanation?.length || 0,
+      success: result.success
+    });
+    
+    return result;
+    
+  } catch (error) {
+    operation();
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    logger.error('RAG explanation failed', {
+      error: errorMessage,
+      queryLength: query.length,
+      resultCount: searchResults.length
+    });
+    
+    // Return a properly formatted error response
+    return {
+      success: false,
+      error: `RAG explanation failed: ${errorMessage}`,
+      model: options.model || 'unknown',
+      provider: 'error'
+    };
+  }
 }
 
 /**
  * Cleanup RAG service resources
+ * Cleans up both the provider manager and legacy Python service
+ * Ensures proper shutdown coordination
  */
 export async function cleanupRAGService(): Promise<void> {
-  return ragService.cleanup();
+  const logger = getLogger('cleanupRAGService');
+  logger.info('Starting RAG service cleanup');
+
+  try {
+    // Cleanup both provider manager and legacy service in parallel
+    await Promise.allSettled([
+      providerManager.cleanup(),
+      ragService.cleanup()
+    ]);
+
+    logger.info('RAG service cleanup completed successfully');
+  } catch (error) {
+    logger.error('Error during RAG service cleanup', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    // Don't throw - cleanup should be best effort
+  }
 }
