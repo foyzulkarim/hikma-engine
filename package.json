@@ -1,6 +1,6 @@
 {
   "name": "hikma-engine",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Code Knowledge Graph Indexer - A sophisticated TypeScript-based indexer that transforms Git repositories into multi-dimensional knowledge stores for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

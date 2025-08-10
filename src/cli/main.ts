@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { EmbedCommand } from './commands/embed';
 import { SearchCommand } from './commands/search';
 import { RagCommand } from './commands/rag';
+import packageJson from '../../package.json';
 
 function createProgram(): Command {
   const program = new Command();
@@ -12,7 +13,7 @@ function createProgram(): Command {
   program
     .name('hikma-engine')
     .description('Hikma Engine - Embed, Search, and RAG for codebases')
-    .version('2.2.0');
+    .version(packageJson.version);
 
   // Register commands
   new EmbedCommand(program).register();
