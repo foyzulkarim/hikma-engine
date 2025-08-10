@@ -16,7 +16,7 @@ import {
  */
 export class LLMProviderFactory {
   private static readonly logger = getLogger('LLMProviderFactory');
-  private static readonly SUPPORTED_PROVIDERS = ['python', 'openai'] as const;
+  private static readonly SUPPORTED_PROVIDERS = ['python', 'server'] as const;
 
   /**
    * Creates a provider instance based on the configuration
@@ -43,7 +43,7 @@ export class LLMProviderFactory {
         case 'python':
           provider = await this.createPythonProvider(config);
           break;
-        case 'openai':
+        case 'server':
           provider = await this.createOpenAIProvider(config);
           break;
         default:
@@ -147,8 +147,8 @@ export class LLMProviderFactory {
       case 'python':
         this.validatePythonConfig(config);
         break;
-      case 'openai':
-        this.validateOpenAIConfig(config);
+      case 'server':
+        this.validateServerConfig(config);
         break;
       default:
         throw new LLMProviderError(
@@ -268,69 +268,69 @@ export class LLMProviderFactory {
   }
 
   /**
-   * Validates OpenAI provider configuration
+   * Validates server provider configuration
    * @param config - The configuration to validate
    * @throws LLMProviderError if validation fails
    */
-  private static validateOpenAIConfig(config: LLMProviderConfig): void {
-    if (!config.openai) {
+  private static validateServerConfig(config: LLMProviderConfig): void {
+    if (!config.server) {
       throw new LLMProviderError(
-        'OpenAI configuration is required when provider is set to "openai"',
+        'Server configuration is required when provider is set to "server"',
         LLMProviderErrorType.CONFIGURATION_ERROR,
         'factory'
       );
     }
 
     const errors: string[] = [];
-    const openaiConfig = config.openai;
+    const serverConfig = config.server;
 
     // Required fields
-    if (!openaiConfig.apiUrl || typeof openaiConfig.apiUrl !== 'string') {
-      errors.push('openai.apiUrl is required and must be a valid string');
+    if (!serverConfig.apiUrl || typeof serverConfig.apiUrl !== 'string') {
+      errors.push('server.apiUrl is required and must be a valid string');
     } else {
       // Validate URL format
       try {
-        new URL(openaiConfig.apiUrl);
+        new URL(serverConfig.apiUrl);
       } catch {
-        errors.push('openai.apiUrl must be a valid URL');
+        errors.push('server.apiUrl must be a valid URL');
       }
     }
 
-    if (!openaiConfig.apiKey || typeof openaiConfig.apiKey !== 'string') {
-      errors.push('openai.apiKey is required and must be a valid string');
+    if (!serverConfig.apiKey || typeof serverConfig.apiKey !== 'string') {
+      errors.push('server.apiKey is required and must be a valid string');
     } else {
       // Basic API key format validation (relaxed for local/self-hosted endpoints)
-      const isLocalEndpoint = openaiConfig.apiUrl.includes('localhost') || 
-                             openaiConfig.apiUrl.includes('127.0.0.1') || 
-                             openaiConfig.apiUrl.includes('0.0.0.0');
+      const isLocalEndpoint = serverConfig.apiUrl.includes('localhost') || 
+                             serverConfig.apiUrl.includes('127.0.0.1') || 
+                             serverConfig.apiUrl.includes('0.0.0.0');
       
-      if (!isLocalEndpoint && !openaiConfig.apiKey.startsWith('sk-') && !openaiConfig.apiKey.startsWith('org-')) {
-        errors.push('openai.apiKey must start with "sk-" or "org-" for external APIs');
+      if (!isLocalEndpoint && !serverConfig.apiKey.startsWith('sk-') && !serverConfig.apiKey.startsWith('org-')) {
+        errors.push('server.apiKey must start with "sk-" or "org-" for external APIs');
       }
     }
 
-    if (!openaiConfig.model || typeof openaiConfig.model !== 'string') {
-      errors.push('openai.model is required and must be a valid string');
+    if (!serverConfig.model || typeof serverConfig.model !== 'string') {
+      errors.push('server.model is required and must be a valid string');
     }
 
     // Optional fields validation
-    if (openaiConfig.maxTokens !== undefined) {
-      if (typeof openaiConfig.maxTokens !== 'number' || openaiConfig.maxTokens <= 0) {
-        errors.push('openai.maxTokens must be a positive number');
+    if (serverConfig.maxTokens !== undefined) {
+      if (typeof serverConfig.maxTokens !== 'number' || serverConfig.maxTokens <= 0) {
+        errors.push('server.maxTokens must be a positive number');
       }
     }
 
-    if (openaiConfig.temperature !== undefined) {
-      if (typeof openaiConfig.temperature !== 'number' || 
-          openaiConfig.temperature < 0 || 
-          openaiConfig.temperature > 2) {
-        errors.push('openai.temperature must be a number between 0 and 2');
+    if (serverConfig.temperature !== undefined) {
+      if (typeof serverConfig.temperature !== 'number' || 
+          serverConfig.temperature < 0 || 
+          serverConfig.temperature > 2) {
+        errors.push('server.temperature must be a number between 0 and 2');
       }
     }
 
     if (errors.length > 0) {
       throw new LLMProviderError(
-        `Invalid OpenAI configuration: ${errors.join(', ')}`,
+        `Invalid server configuration: ${errors.join(', ')}`,
         LLMProviderErrorType.CONFIGURATION_ERROR,
         'factory'
       );
@@ -356,9 +356,9 @@ export class LLMProviderFactory {
         description: 'Local Python-based LLM provider using the existing Python implementation',
         requiredConfig: ['timeout', 'retryAttempts', 'retryDelay']
       },
-      openai: {
-        description: 'OpenAI API-based LLM provider for external AI services',
-        requiredConfig: ['timeout', 'retryAttempts', 'retryDelay', 'openai.apiUrl', 'openai.apiKey', 'openai.model']
+      server: {
+        description: 'Server-based LLM provider for external AI services',
+        requiredConfig: ['timeout', 'retryAttempts', 'retryDelay', 'server.apiUrl', 'server.apiKey', 'server.model']
       }
     };
   }

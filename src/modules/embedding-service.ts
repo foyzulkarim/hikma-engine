@@ -48,11 +48,11 @@ export class EmbeddingService {
 
     try {
       const aiConfig = this.config.getAIConfig();
+      // Log only relevant fields to avoid confusion when switching providers
       this.logger.info('Loading embedding model', {
         model: aiConfig.embedding.model,
         batchSize: aiConfig.embedding.batchSize,
-        provider: aiConfig.embedding.provider,
-        endpoint: aiConfig.embedding.localEndpoint,
+        provider: aiConfig.embedding.provider
       });
 
       if (aiConfig.embedding.provider === 'local') {
@@ -87,31 +87,31 @@ export class EmbeddingService {
           model: aiConfig.embedding.model,
         };
         this.logger.info('Python embedding provider configured successfully');
-      } else if (aiConfig.embedding.provider === 'openai') {
-        // For OpenAI provider, validate configuration
-        if (!aiConfig.embedding.openai?.apiUrl) {
-          throw new Error('OpenAI embedding provider requires apiUrl configuration');
+      } else if (aiConfig.embedding.provider === 'server') {
+        // For Server provider, validate configuration
+        if (!aiConfig.embedding.server?.apiUrl) {
+          throw new Error('Server embedding provider requires apiUrl configuration');
         }
-        if (!aiConfig.embedding.openai?.model) {
-          throw new Error('OpenAI embedding provider requires model configuration');
+        if (!aiConfig.embedding.server?.model) {
+          throw new Error('Server embedding provider requires model configuration');
         }
         const normalizedApiUrl = this.normalizeOpenAIBaseUrl(
-          aiConfig.embedding.openai.apiUrl
+          aiConfig.embedding.server.apiUrl
         );
-        this.logger.info('Using OpenAI embedding provider', {
+        this.logger.info('Using Server embedding provider', {
           apiUrl: normalizedApiUrl,
-          model: aiConfig.embedding.openai.model,
+          model: aiConfig.embedding.server.model,
         });
         this.model = {
-          provider: 'openai',
+          provider: 'server',
           apiUrl: normalizedApiUrl,
-          apiKey: aiConfig.embedding.openai.apiKey,
-          model: aiConfig.embedding.openai.model,
+          apiKey: aiConfig.embedding.server.apiKey,
+          model: aiConfig.embedding.server.model,
         };
-        this.logger.info('OpenAI embedding provider configured successfully');
+        this.logger.info('Server embedding provider configured successfully');
       } else {
         throw new Error(
-          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python', 'openai'`
+          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python', 'server'`
         );
       }
 
@@ -248,11 +248,11 @@ export class EmbeddingService {
     ) {
       return await this.generatePythonEmbedding(text, isQuery);
     } else if (
-      aiConfig.embedding.provider === 'openai' &&
+      aiConfig.embedding.provider === 'server' &&
       this.model &&
       typeof this.model === 'object' &&
       'provider' in this.model &&
-      this.model.provider === 'openai'
+      this.model.provider === 'server'
     ) {
       return await this.generateOpenAIEmbedding(text, isQuery);
     } else {
@@ -532,8 +532,8 @@ export class EmbeddingService {
    * @returns {Promise<number[]>} The generated embedding vector.
    */
   private async generateOpenAIEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
-    if (!this.model || this.model.provider !== 'openai') {
-      throw new Error('OpenAI embedding model not configured');
+    if (!this.model || this.model.provider !== 'server') {
+      throw new Error('Server embedding model not configured');
     }
 
     try {

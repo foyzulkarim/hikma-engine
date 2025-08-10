@@ -16,9 +16,9 @@ export interface AIConfig {
   embedding: {
     model: string;
     batchSize: number;
-    provider: 'local' | 'transformers' | 'python' | 'openai';
+    provider: 'local' | 'transformers' | 'python' | 'server';
     localEndpoint?: string;
-    openai?: {
+    server?: {
       apiUrl: string;
       apiKey?: string;
       model: string;
@@ -32,11 +32,11 @@ export interface AIConfig {
     model: string;
   };
   llmProvider: {
-    provider: 'python' | 'openai';
+    provider: 'python' | 'server';
     timeout: number;
     retryAttempts: number;
     retryDelay: number;
-    openai?: {
+    server?: {
       apiUrl: string;
       apiKey: string;
       model: string;
@@ -91,14 +91,14 @@ const defaultConfig: AppConfig = {
       maxTokens: 256,
     },
     rag: {
-      model: 'Qwen/Qwen2.5-Coder-1.5B-Instruct', // Fallback model for Python provider - main LLM config is in ai.llmProvider.openai.model
+      model: 'Qwen/Qwen2.5-Coder-1.5B-Instruct', // Fallback model for Python provider - main LLM config is in ai.llmProvider.server.model
     },
     llmProvider: {
-      provider: 'openai',
+      provider: 'server',
       timeout: 300000,
       retryAttempts: 3,
       retryDelay: 1000,
-      openai: {
+      server: {
         apiUrl: 'http://localhost:1234/v1/chat/completions',
         apiKey: 'not-needed',
         model: 'qwen/qwen3-coder-30b',
@@ -181,39 +181,39 @@ export class ConfigManager {
 
     // Override embedding provider configuration
     if (process.env.HIKMA_EMBEDDING_PROVIDER) {
-      const provider = process.env.HIKMA_EMBEDDING_PROVIDER as 'local' | 'transformers' | 'python' | 'openai';
-      if (['local', 'transformers', 'python', 'openai'].includes(provider)) {
+      const provider = process.env.HIKMA_EMBEDDING_PROVIDER as 'local' | 'transformers' | 'python' | 'server';
+      if (['local', 'transformers', 'python', 'server'].includes(provider)) {
         config.ai.embedding.provider = provider;
       }
     }
 
-    // OpenAI embedding provider configuration
-    if (process.env.HIKMA_EMBEDDING_OPENAI_API_URL || 
-        process.env.HIKMA_EMBEDDING_OPENAI_API_KEY || 
-        process.env.HIKMA_EMBEDDING_OPENAI_MODEL) {
+    // Server embedding provider configuration
+    if (process.env.HIKMA_EMBEDDING_SERVER_API_URL || 
+        process.env.HIKMA_EMBEDDING_SERVER_API_KEY || 
+        process.env.HIKMA_EMBEDDING_SERVER_MODEL) {
       
-      if (!config.ai.embedding.openai) {
-        config.ai.embedding.openai = {
+      if (!config.ai.embedding.server) {
+        config.ai.embedding.server = {
           apiUrl: 'http://localhost:11434',
           model: 'mxbai-embed-large:latest',
         };
       }
       
-      if (process.env.HIKMA_EMBEDDING_OPENAI_API_URL) {
-        config.ai.embedding.openai.apiUrl = process.env.HIKMA_EMBEDDING_OPENAI_API_URL;
+      if (process.env.HIKMA_EMBEDDING_SERVER_API_URL) {
+        config.ai.embedding.server.apiUrl = process.env.HIKMA_EMBEDDING_SERVER_API_URL;
       }
-      if (process.env.HIKMA_EMBEDDING_OPENAI_API_KEY) {
-        config.ai.embedding.openai.apiKey = process.env.HIKMA_EMBEDDING_OPENAI_API_KEY;
+      if (process.env.HIKMA_EMBEDDING_SERVER_API_KEY) {
+        config.ai.embedding.server.apiKey = process.env.HIKMA_EMBEDDING_SERVER_API_KEY;
       }
-      if (process.env.HIKMA_EMBEDDING_OPENAI_MODEL) {
-        config.ai.embedding.openai.model = process.env.HIKMA_EMBEDDING_OPENAI_MODEL;
+      if (process.env.HIKMA_EMBEDDING_SERVER_MODEL) {
+        config.ai.embedding.server.model = process.env.HIKMA_EMBEDDING_SERVER_MODEL;
       }
     }
 
     // Override LLM provider configuration
     if (process.env.HIKMA_ENGINE_LLM_PROVIDER) {
-      const provider = process.env.HIKMA_ENGINE_LLM_PROVIDER as 'python' | 'openai';
-      if (provider === 'python' || provider === 'openai') {
+      const provider = process.env.HIKMA_ENGINE_LLM_PROVIDER as 'python' | 'server';
+      if (provider === 'python' || provider === 'server') {
         config.ai.llmProvider.provider = provider;
       }
     }
@@ -236,39 +236,39 @@ export class ConfigManager {
       }
     }
 
-    // OpenAI-specific configuration
-    if (process.env.HIKMA_ENGINE_LLM_OPENAI_API_URL || 
-        process.env.HIKMA_ENGINE_LLM_OPENAI_API_KEY || 
-        process.env.HIKMA_ENGINE_LLM_OPENAI_MODEL) {
+    // Server-specific configuration
+    if (process.env.HIKMA_ENGINE_LLM_SERVER_API_URL || 
+        process.env.HIKMA_ENGINE_LLM_SERVER_API_KEY || 
+        process.env.HIKMA_ENGINE_LLM_SERVER_MODEL) {
       
-      if (!config.ai.llmProvider.openai) {
-        config.ai.llmProvider.openai = {
+      if (!config.ai.llmProvider.server) {
+        config.ai.llmProvider.server = {
           apiUrl: 'http://localhost:1234',
           apiKey: '',
           // model: 'openai/gpt-oss-20b',
-          model: 'qwen/qwen3-coder-30b' // Fallback configuration - main config is in defaultConfig.ai.llmProvider.openai.model
+          model: 'qwen/qwen3-coder-30b' // Fallback configuration - main config is in defaultConfig.ai.llmProvider.server.model
         };
       }
-
-      if (process.env.HIKMA_ENGINE_LLM_OPENAI_API_URL) {
-        config.ai.llmProvider.openai.apiUrl = process.env.HIKMA_ENGINE_LLM_OPENAI_API_URL;
+      
+      if (process.env.HIKMA_ENGINE_LLM_SERVER_API_URL) {
+        config.ai.llmProvider.server.apiUrl = process.env.HIKMA_ENGINE_LLM_SERVER_API_URL;
       }
-      if (process.env.HIKMA_ENGINE_LLM_OPENAI_API_KEY) {
-        config.ai.llmProvider.openai.apiKey = process.env.HIKMA_ENGINE_LLM_OPENAI_API_KEY;
+      if (process.env.HIKMA_ENGINE_LLM_SERVER_API_KEY) {
+        config.ai.llmProvider.server.apiKey = process.env.HIKMA_ENGINE_LLM_SERVER_API_KEY;
       }
-      if (process.env.HIKMA_ENGINE_LLM_OPENAI_MODEL) {
-        config.ai.llmProvider.openai.model = process.env.HIKMA_ENGINE_LLM_OPENAI_MODEL;
+      if (process.env.HIKMA_ENGINE_LLM_SERVER_MODEL) {
+        config.ai.llmProvider.server.model = process.env.HIKMA_ENGINE_LLM_SERVER_MODEL;
       }
-      if (process.env.HIKMA_ENGINE_LLM_OPENAI_MAX_TOKENS) {
-        const maxTokens = parseInt(process.env.HIKMA_ENGINE_LLM_OPENAI_MAX_TOKENS, 10);
+      if (process.env.HIKMA_ENGINE_LLM_SERVER_MAX_TOKENS) {
+        const maxTokens = parseInt(process.env.HIKMA_ENGINE_LLM_SERVER_MAX_TOKENS, 10);
         if (!isNaN(maxTokens) && maxTokens > 0) {
-          config.ai.llmProvider.openai.maxTokens = maxTokens;
+          config.ai.llmProvider.server.maxTokens = maxTokens;
         }
       }
-      if (process.env.HIKMA_ENGINE_LLM_OPENAI_TEMPERATURE) {
-        const temperature = parseFloat(process.env.HIKMA_ENGINE_LLM_OPENAI_TEMPERATURE);
+      if (process.env.HIKMA_ENGINE_LLM_SERVER_TEMPERATURE) {
+        const temperature = parseFloat(process.env.HIKMA_ENGINE_LLM_SERVER_TEMPERATURE);
         if (!isNaN(temperature) && temperature >= 0 && temperature <= 2) {
-          config.ai.llmProvider.openai.temperature = temperature;
+          config.ai.llmProvider.server.temperature = temperature;
         }
       }
     }
@@ -366,53 +366,53 @@ export class ConfigManager {
     }
 
     // Validate provider-specific configuration
-    if (llmConfig.provider === 'openai') {
-      if (!llmConfig.openai) {
-        throw new Error('OpenAI configuration is required when provider is set to "openai"');
+    if (llmConfig.provider === 'server') {
+      if (!llmConfig.server) {
+        throw new Error('Server configuration is required when provider is set to "server"');
       }
 
-      const openaiConfig = llmConfig.openai;
+      const serverConfig = llmConfig.server;
 
-      if (!openaiConfig.apiUrl || typeof openaiConfig.apiUrl !== 'string') {
-        throw new Error('OpenAI API URL is required and must be a valid string');
+      if (!serverConfig.apiUrl || typeof serverConfig.apiUrl !== 'string') {
+        throw new Error('Server API URL is required and must be a valid string');
       }
 
-      if (!openaiConfig.apiKey || typeof openaiConfig.apiKey !== 'string') {
-        throw new Error('OpenAI API key is required and must be a valid string');
+      if (!serverConfig.apiKey || typeof serverConfig.apiKey !== 'string') {
+        throw new Error('Server API key is required and must be a valid string');
       }
 
-      if (!openaiConfig.model || typeof openaiConfig.model !== 'string') {
-        throw new Error('OpenAI model is required and must be a valid string');
+      if (!serverConfig.model || typeof serverConfig.model !== 'string') {
+        throw new Error('Server model is required and must be a valid string');
       }
 
       // Validate URL format
       try {
-        new URL(openaiConfig.apiUrl);
+        new URL(serverConfig.apiUrl);
       } catch {
-        throw new Error('OpenAI API URL must be a valid URL');
+        throw new Error('Server API URL must be a valid URL');
       }
 
       // Validate API key format (relaxed for local/self-hosted endpoints)
-      const isLocalEndpoint = openaiConfig.apiUrl.includes('localhost') || 
-                             openaiConfig.apiUrl.includes('127.0.0.1') || 
-                             openaiConfig.apiUrl.includes('0.0.0.0');
+      const isLocalEndpoint = serverConfig.apiUrl.includes('localhost') || 
+                             serverConfig.apiUrl.includes('127.0.0.1') || 
+                             serverConfig.apiUrl.includes('0.0.0.0');
       
-      if (!isLocalEndpoint && !openaiConfig.apiKey.startsWith('sk-') && !openaiConfig.apiKey.startsWith('org-')) {
-        throw new Error('OpenAI API key must start with "sk-" or "org-" for external APIs');
+      if (!isLocalEndpoint && !serverConfig.apiKey.startsWith('sk-') && !serverConfig.apiKey.startsWith('org-')) {
+        throw new Error('Server API key must start with "sk-" or "org-" for external APIs');
       }
 
       // Validate optional parameters
-      if (openaiConfig.maxTokens !== undefined) {
-        if (typeof openaiConfig.maxTokens !== 'number' || openaiConfig.maxTokens <= 0) {
-          throw new Error('OpenAI max tokens must be a positive number');
+      if (serverConfig.maxTokens !== undefined) {
+        if (typeof serverConfig.maxTokens !== 'number' || serverConfig.maxTokens <= 0) {
+          throw new Error('Server max tokens must be a positive number');
         }
       }
 
-      if (openaiConfig.temperature !== undefined) {
-        if (typeof openaiConfig.temperature !== 'number' || 
-            openaiConfig.temperature < 0 || 
-            openaiConfig.temperature > 2) {
-          throw new Error('OpenAI temperature must be a number between 0 and 2');
+      if (serverConfig.temperature !== undefined) {
+        if (typeof serverConfig.temperature !== 'number' || 
+            serverConfig.temperature < 0 || 
+            serverConfig.temperature > 2) {
+          throw new Error('Server temperature must be a number between 0 and 2');
         }
       }
     } else if (llmConfig.provider === 'python') {

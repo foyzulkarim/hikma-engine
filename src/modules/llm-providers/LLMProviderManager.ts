@@ -65,7 +65,7 @@ export class LLMProviderManager {
   constructor(config?: Partial<ProviderManagerConfig>) {
     this.config = {
       primaryProvider: 'python',
-      fallbackProviders: ['openai'],
+      fallbackProviders: ['server'],
       selectionStrategy: 'primary-fallback',
       healthCheckInterval: 60000, // 1 minute
       maxConsecutiveFailures: 3,
@@ -81,6 +81,12 @@ export class LLMProviderManager {
 
     // Start periodic metrics reporting
     this.startMetricsReporting();
+    
+    // Debug: Log that timers are being started
+    this.logger.debug('LLMProviderManager constructor completed', {
+      willStartHealthMonitoring: false, // Health monitoring starts in initialize()
+      metricsReportingStarted: true
+    });
   }
 
   /**
@@ -102,11 +108,11 @@ export class LLMProviderManager {
       // Align manager's primary/fallback providers with configured provider
       const configuredPrimary = llmConfig.provider;
       this.config.primaryProvider = configuredPrimary;
-      // When explicitly using openai, do not fallback to python implicitly
-      if (configuredPrimary === 'openai') {
+      // When explicitly using server, do not fallback to python implicitly
+      if (configuredPrimary === 'server') {
         this.config.fallbackProviders = [];
       } else {
-        this.config.fallbackProviders = ['openai'];
+        this.config.fallbackProviders = ['server'];
       }
 
       // Create all available providers
@@ -118,7 +124,7 @@ export class LLMProviderManager {
           // Create provider-specific configuration
           const providerConfig: LLMProviderConfig = {
             ...llmConfig,
-            provider: providerType as 'python' | 'openai'
+            provider: providerType as 'python' | 'server'
           };
 
           const provider = await LLMProviderFactory.createProvider(providerConfig);

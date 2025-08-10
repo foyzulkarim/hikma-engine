@@ -412,29 +412,52 @@ const providerManager = new LLMProviderManager();
 
 // Cleanup on process exit
 process.on('exit', () => {
-  Promise.allSettled([
-    ragService.cleanup(),
-    providerManager.cleanup()
-  ]).catch(() => {
+  // Synchronous cleanup only - async operations are not allowed in 'exit' handler
+  try {
+    if (ragService['activeProcess'] && !ragService['activeProcess'].killed) {
+      ragService['activeProcess'].kill('SIGKILL');
+    }
+  } catch {
     // Ignore cleanup errors on exit
+  }
+});
+
+// Only register signal handlers if we're not in a CLI context
+// CLI commands should handle their own exit logic
+const isCLIContext = process.argv.some(arg => 
+  arg.includes('hikma-engine') || 
+  arg.includes('cli') || 
+  arg.includes('main.js') ||
+  arg.includes('embed') ||
+  arg.includes('search') ||
+  arg.includes('rag')
+);
+
+// Debug: Log detection result
+const logger = getLogger('ProcessSignalSetup');
+logger.debug('CLI context detection', { 
+  isCLIContext, 
+  argv: process.argv,
+  willRegisterSignalHandlers: !isCLIContext 
+});
+
+if (!isCLIContext) {
+  process.on('SIGINT', async () => {
+    await Promise.allSettled([
+      ragService.cleanup(),
+      providerManager.cleanup()
+    ]);
+    process.exit(0);
   });
-});
 
-process.on('SIGINT', async () => {
-  await Promise.allSettled([
-    ragService.cleanup(),
-    providerManager.cleanup()
-  ]);
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  await Promise.allSettled([
-    ragService.cleanup(),
-    providerManager.cleanup()
-  ]);
-  process.exit(0);
-});
+  process.on('SIGTERM', async () => {
+    await Promise.allSettled([
+      ragService.cleanup(),
+      providerManager.cleanup()
+    ]);
+    process.exit(0);
+  });
+}
 
 /**
  * Generate an explanation for search results using LLM-based RAG

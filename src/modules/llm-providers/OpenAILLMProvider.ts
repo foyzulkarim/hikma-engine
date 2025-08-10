@@ -119,7 +119,7 @@ interface EnhancedRequestContext extends RequestContext {
  * Sophisticated OpenAI LLM Provider with advanced features
  */
 export class OpenAILLMProvider extends BaseProvider {
-  readonly name = 'openai';
+  readonly name = 'server';
   private httpClient: HTTPClient;
   private _isAvailable: boolean | null = null;
   private _availabilityChecked = false;
@@ -157,9 +157,9 @@ Focus on:
   constructor(config: LLMProviderConfig) {
     super(config);
     
-    if (!config.openai) {
+    if (!config.server) {
       throw this.createError(
-        'OpenAI configuration is required for OpenAI provider',
+        'Server configuration is required for server provider',
         LLMProviderErrorType.CONFIGURATION_ERROR
       );
     }
@@ -172,11 +172,11 @@ Focus on:
       userAgent: 'hikma-engine/1.0.0 (OpenAI Provider)'
     });
 
-    this.logger.debug('OpenAI LLM Provider initialized', {
-      apiUrl: config.openai.apiUrl,
-      model: config.openai.model,
-      maxTokens: config.openai.maxTokens,
-      temperature: config.openai.temperature
+      this.logger.debug('Server LLM Provider initialized', {
+      apiUrl: config.server.apiUrl,
+      model: config.server.model,
+      maxTokens: config.server.maxTokens,
+      temperature: config.server.temperature
     });
   }
 
@@ -338,7 +338,7 @@ Focus on:
       requestId: context.requestId,
       queryLength: query.length,
       resultCount: searchResults.length,
-      model: options.model || this.config.openai?.model
+      model: options.model || this.config.server?.model
     });
 
     try {
@@ -428,75 +428,75 @@ Focus on:
       // Validate common configuration
       this.validateCommonConfig();
 
-      // Validate OpenAI-specific configuration
-      if (!this.config.openai) {
+      // Validate server-specific configuration
+      if (!this.config.server) {
         throw this.createError(
-          'OpenAI configuration is required',
+          'Server configuration is required',
           LLMProviderErrorType.CONFIGURATION_ERROR
         );
       }
 
-      const openaiConfig = this.config.openai;
+      const serverConfig = this.config.server;
 
       // Validate required fields
-      if (!openaiConfig.apiUrl || typeof openaiConfig.apiUrl !== 'string') {
+      if (!serverConfig.apiUrl || typeof serverConfig.apiUrl !== 'string') {
         throw this.createError(
-          'OpenAI API URL is required and must be a valid string',
+          'Server API URL is required and must be a valid string',
           LLMProviderErrorType.CONFIGURATION_ERROR
         );
       }
 
-      if (!openaiConfig.apiKey || typeof openaiConfig.apiKey !== 'string') {
+      if (!serverConfig.apiKey || typeof serverConfig.apiKey !== 'string') {
         throw this.createError(
-          'OpenAI API key is required and must be a valid string',
+          'Server API key is required and must be a valid string',
           LLMProviderErrorType.CONFIGURATION_ERROR
         );
       }
 
-      if (!openaiConfig.model || typeof openaiConfig.model !== 'string') {
+      if (!serverConfig.model || typeof serverConfig.model !== 'string') {
         throw this.createError(
-          'OpenAI model is required and must be a valid string',
+          'Server model is required and must be a valid string',
           LLMProviderErrorType.CONFIGURATION_ERROR
         );
       }
 
       // Validate URL format
       try {
-        new URL(openaiConfig.apiUrl);
+        new URL(serverConfig.apiUrl);
       } catch {
         throw this.createError(
-          'OpenAI API URL must be a valid URL',
+          'Server API URL must be a valid URL',
           LLMProviderErrorType.CONFIGURATION_ERROR
         );
       }
 
       // Validate API key format (relaxed for local/self-hosted endpoints)
-      const isLocalEndpoint = openaiConfig.apiUrl.includes('localhost') || 
-                             openaiConfig.apiUrl.includes('127.0.0.1') || 
-                             openaiConfig.apiUrl.includes('0.0.0.0');
+      const isLocalEndpoint = serverConfig.apiUrl.includes('localhost') || 
+                             serverConfig.apiUrl.includes('127.0.0.1') || 
+                             serverConfig.apiUrl.includes('0.0.0.0');
       
-      if (!isLocalEndpoint && !openaiConfig.apiKey.startsWith('sk-') && !openaiConfig.apiKey.startsWith('org-')) {
-        this.logger.warn('OpenAI API key format may be invalid for external APIs', {
-          keyPrefix: openaiConfig.apiKey.substring(0, 4)
+      if (!isLocalEndpoint && !serverConfig.apiKey.startsWith('sk-') && !serverConfig.apiKey.startsWith('org-')) {
+        this.logger.warn('Server API key format may be invalid for external APIs', {
+          keyPrefix: serverConfig.apiKey.substring(0, 4)
         });
       }
 
       // Validate optional parameters
-      if (openaiConfig.maxTokens !== undefined) {
-        if (typeof openaiConfig.maxTokens !== 'number' || openaiConfig.maxTokens <= 0) {
+      if (serverConfig.maxTokens !== undefined) {
+        if (typeof serverConfig.maxTokens !== 'number' || serverConfig.maxTokens <= 0) {
           throw this.createError(
-            'OpenAI maxTokens must be a positive number',
+            'Server maxTokens must be a positive number',
             LLMProviderErrorType.CONFIGURATION_ERROR
           );
         }
       }
 
-      if (openaiConfig.temperature !== undefined) {
-        if (typeof openaiConfig.temperature !== 'number' || 
-            openaiConfig.temperature < 0 || 
-            openaiConfig.temperature > 2) {
+      if (serverConfig.temperature !== undefined) {
+        if (typeof serverConfig.temperature !== 'number' || 
+            serverConfig.temperature < 0 || 
+            serverConfig.temperature > 2) {
           throw this.createError(
-            'OpenAI temperature must be a number between 0 and 2',
+            'Server temperature must be a number between 0 and 2',
             LLMProviderErrorType.CONFIGURATION_ERROR
           );
         }
@@ -519,10 +519,10 @@ Focus on:
       this._availabilityChecked = true;
       logEnd();
 
-      this.logger.debug('OpenAI provider configuration validated', {
+      this.logger.debug('Server provider configuration validated', {
         isAvailable: this._isAvailable,
-        apiUrl: openaiConfig.apiUrl,
-        model: openaiConfig.model
+        apiUrl: serverConfig.apiUrl,
+        model: serverConfig.model
       });
 
       return true;
@@ -579,7 +579,7 @@ Focus on:
     options: RAGOptions,
     context: EnhancedRequestContext
   ): OpenAIRequest {
-    const openaiConfig = this.config.openai!;
+    const serverConfig = this.config.server!;
     
     // Select appropriate system prompt based on query context
     const systemPrompt = this.selectSystemPrompt(query);
@@ -591,7 +591,7 @@ Focus on:
     const userMessage = this.buildUserMessage(query, contextText, context);
 
     const request: OpenAIRequest = {
-      model: options.model || openaiConfig.model,
+      model: options.model || serverConfig.model,
       messages: [
         {
           role: 'system',
@@ -602,8 +602,8 @@ Focus on:
           content: userMessage
         }
       ],
-      max_tokens: options.maxTokens || openaiConfig.maxTokens || 400,
-      temperature: openaiConfig.temperature ?? 0.6,
+      max_tokens: options.maxTokens || serverConfig.maxTokens || 2000,
+      temperature: serverConfig.temperature ?? 0.6,
       top_p: 0.9,
       frequency_penalty: 0.1,
       presence_penalty: 0.1
@@ -730,10 +730,11 @@ Keep your response focused, technical, and helpful for a developer trying to und
    * Make HTTP request to OpenAI API with enhanced error handling
    */
   private async makeOpenAIRequest(request: OpenAIRequest, context: EnhancedRequestContext): Promise<OpenAIResponse> {
-    const openaiConfig = this.config.openai!;
-    
+    const serverConfig = this.config.server!;
+    const endpoint = this.normalizeChatCompletionsUrl(serverConfig.apiUrl);
+
     const headers = {
-      'Authorization': `Bearer ${openaiConfig.apiKey}`,
+      'Authorization': `Bearer ${serverConfig.apiKey}`,
       'Content-Type': 'application/json',
       'User-Agent': 'hikma-engine/1.0.0',
       'X-Request-ID': context.requestId
@@ -741,7 +742,7 @@ Keep your response focused, technical, and helpful for a developer trying to und
 
     try {
       const response = await this.httpClient.post<OpenAIResponse>(
-        openaiConfig.apiUrl,
+        endpoint,
         request,
         headers,
         context
@@ -945,11 +946,12 @@ Keep your response focused, technical, and helpful for a developer trying to und
    * Test connectivity to OpenAI API
    */
   private async testConnectivity(): Promise<void> {
-    const openaiConfig = this.config.openai!;
-    
+    const serverConfig = this.config.server!;
+    const endpoint = this.normalizeChatCompletionsUrl(serverConfig.apiUrl);
+
     // Simple test request to validate connectivity and authentication
     const testRequest: OpenAIRequest = {
-      model: openaiConfig.model,
+      model: serverConfig.model,
       messages: [
         {
           role: 'user',
@@ -960,14 +962,14 @@ Keep your response focused, technical, and helpful for a developer trying to und
     };
 
     const headers = {
-      'Authorization': `Bearer ${openaiConfig.apiKey}`,
+      'Authorization': `Bearer ${serverConfig.apiKey}`,
       'Content-Type': 'application/json',
       'User-Agent': 'hikma-engine/1.0.0 (connectivity-test)'
     };
 
     try {
       await this.httpClient.post<OpenAIResponse>(
-        openaiConfig.apiUrl,
+        endpoint,
         testRequest,
         headers,
         { requestId: 'connectivity-test', startTime: Date.now(), attempt: 1, query: 'test', resultCount: 0 }
@@ -1008,6 +1010,26 @@ Keep your response focused, technical, and helpful for a developer trying to und
       },
       retryHistory: []
     };
+  }
+
+  /**
+   * Normalize a provided API base or full URL to the chat completions endpoint
+   * Accepts inputs like base or full paths and returns a clean endpoint such as http://host:port/v1/chat/completions
+   */
+  private normalizeChatCompletionsUrl(rawUrl: string): string {
+    try {
+      let url = (rawUrl || '').trim();
+      url = url.replace(/\/+$/, '');
+      // If it already ends with /v1/chat/completions, keep it
+      if (/\/v1\/chat\/completions$/i.test(url)) {
+        return url;
+      }
+      // Strip trailing /v1 if present, then append full endpoint
+      url = url.replace(/\/v1$/i, '').replace(/\/+$/, '');
+      return `${url}/v1/chat/completions`;
+    } catch {
+      return rawUrl;
+    }
   }
 
   /**
@@ -1096,7 +1118,7 @@ Keep your response focused, technical, and helpful for a developer trying to und
    * Generate unique request ID
    */
   private generateRequestId(): string {
-    return `openai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `server-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
@@ -1150,10 +1172,10 @@ Keep your response focused, technical, and helpful for a developer trying to und
       description: 'OpenAI-compatible API provider for external LLM services',
       isAvailable: this.isAvailable,
       configuration: {
-        apiUrl: this.config.openai?.apiUrl,
-        model: this.config.openai?.model,
-        maxTokens: this.config.openai?.maxTokens,
-        temperature: this.config.openai?.temperature,
+        apiUrl: this.config.server?.apiUrl,
+        model: this.config.server?.model,
+        maxTokens: this.config.server?.maxTokens,
+        temperature: this.config.server?.temperature,
         timeout: this.config.timeout
       },
       capabilities: [

@@ -21,7 +21,7 @@ export enum LLMProviderErrorType {
  */
 export interface LLMProviderConfig {
   /** The provider type to use */
-  provider: 'python' | 'openai';
+  provider: 'python' | 'server';
   
   /** Request timeout in milliseconds */
   timeout: number;
@@ -32,11 +32,11 @@ export interface LLMProviderConfig {
   /** Delay between retry attempts in milliseconds */
   retryDelay: number;
   
-  /** OpenAI-specific configuration */
-  openai?: {
-    /** OpenAI API URL */
+  /** Server-specific configuration */
+  server?: {
+    /** Server API URL */
     apiUrl: string;
-    /** OpenAI API key */
+    /** Server API key */
     apiKey: string;
     /** Model name to use */
     model: string;
