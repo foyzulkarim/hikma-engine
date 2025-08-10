@@ -58,10 +58,15 @@ export abstract class BaseCommand {
         embedding: {
           provider: opts.provider,
           model: embeddingModel,
+          batchSize: 32, // Default batch size for embedding processing
           server: opts.provider === 'server' ? {
             apiUrl: serverUrl,
             model: embeddingModel
           } : undefined
+        },
+        summary: {
+          model: llmModel,
+          maxTokens: 256
         },
         rag: {
           model: llmModel
