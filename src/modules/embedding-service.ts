@@ -48,11 +48,11 @@ export class EmbeddingService {
 
     try {
       const aiConfig = this.config.getAIConfig();
+      // Log only relevant fields to avoid confusion when switching providers
       this.logger.info('Loading embedding model', {
         model: aiConfig.embedding.model,
         batchSize: aiConfig.embedding.batchSize,
-        provider: aiConfig.embedding.provider,
-        endpoint: aiConfig.embedding.localEndpoint,
+        provider: aiConfig.embedding.provider
       });
 
       if (aiConfig.embedding.provider === 'local') {
@@ -87,9 +87,31 @@ export class EmbeddingService {
           model: aiConfig.embedding.model,
         };
         this.logger.info('Python embedding provider configured successfully');
+      } else if (aiConfig.embedding.provider === 'server') {
+        // For Server provider, validate configuration
+        if (!aiConfig.embedding.server?.apiUrl) {
+          throw new Error('Server embedding provider requires apiUrl configuration');
+        }
+        if (!aiConfig.embedding.server?.model) {
+          throw new Error('Server embedding provider requires model configuration');
+        }
+        const normalizedApiUrl = this.normalizeOpenAIBaseUrl(
+          aiConfig.embedding.server.apiUrl
+        );
+        this.logger.info('Using Server embedding provider', {
+          apiUrl: normalizedApiUrl,
+          model: aiConfig.embedding.server.model,
+        });
+        this.model = {
+          provider: 'server',
+          apiUrl: normalizedApiUrl,
+          apiKey: aiConfig.embedding.server.apiKey,
+          model: aiConfig.embedding.server.model,
+        };
+        this.logger.info('Server embedding provider configured successfully');
       } else {
         throw new Error(
-          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python'`
+          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'python', 'server'`
         );
       }
 
@@ -225,6 +247,14 @@ export class EmbeddingService {
       this.model.provider === 'python'
     ) {
       return await this.generatePythonEmbedding(text, isQuery);
+    } else if (
+      aiConfig.embedding.provider === 'server' &&
+      this.model &&
+      typeof this.model === 'object' &&
+      'provider' in this.model &&
+      this.model.provider === 'server'
+    ) {
+      return await this.generateOpenAIEmbedding(text, isQuery);
     } else {
       // Simple fallback embedding - hash-based approach
       this.logger.warn('Using fallback hash-based embedding generation', {
@@ -249,6 +279,24 @@ export class EmbeddingService {
       hash.push(text.charCodeAt(i));
     }
     return hash;
+  }
+
+  /**
+   * Normalizes user-provided OpenAI-compatible API URL to a base URL.
+   * Accepts inputs like base or full paths and returns a clean base such as http://localhost:11434
+   */
+  private normalizeOpenAIBaseUrl(rawUrl: string): string {
+    try {
+      let url = (rawUrl || '').trim();
+      url = url.replace(/\/+$/, '');
+      url = url.replace(/\/v1\/embeddings$/i, '');
+      url = url.replace(/\/api\/embeddings$/i, '');
+      url = url.replace(/\/v1$/i, '');
+      url = url.replace(/\/+$/, '');
+      return url;
+    } catch {
+      return rawUrl;
+    }
   }
 
   /**
@@ -471,6 +519,88 @@ export class EmbeddingService {
     } catch (error) {
       this.logger.error('Failed to generate LM Studio embedding', {
         endpoint,
+        error: getErrorMessage(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Generates embedding using OpenAI-compatible API (like Ollama).
+   * @param {string} text - The text to generate an embedding for.
+   * @param {boolean} isQuery - Whether this is a query embedding.
+   * @returns {Promise<number[]>} The generated embedding vector.
+   */
+  private async generateOpenAIEmbedding(text: string, isQuery: boolean = false): Promise<number[]> {
+    if (!this.model || this.model.provider !== 'server') {
+      throw new Error('Server embedding model not configured');
+    }
+
+    try {
+      this.logger.debug('Generating embedding via OpenAI API', {
+        apiUrl: this.model.apiUrl,
+        model: this.model.model,
+        textLength: text.length,
+        isQuery,
+      });
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      // Add API key if provided
+      if (this.model.apiKey) {
+        headers['Authorization'] = `Bearer ${this.model.apiKey}`;
+      }
+
+      const response = await fetch(`${this.model.apiUrl}/v1/embeddings`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          input: text,
+          model: this.model.model,
+        }),
+        signal: AbortSignal.timeout(30000), // 30 second timeout
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error('OpenAI API error', {
+          apiUrl: this.model.apiUrl,
+          status: response.status,
+          error: errorText,
+        });
+
+        throw new Error(
+          `OpenAI API error (${response.status}): ${errorText}`
+        );
+      }
+
+      const result = await response.json();
+
+      if (
+        !result.data ||
+        !Array.isArray(result.data) ||
+        result.data.length === 0
+      ) {
+        throw new Error('Invalid response format from OpenAI API');
+      }
+
+      const embedding = result.data[0].embedding;
+
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw new Error('Invalid embedding format from OpenAI API');
+      }
+
+      this.logger.debug('OpenAI embedding generated successfully', {
+        dimensions: embedding.length,
+        textLength: text.length,
+      });
+
+      return embedding;
+    } catch (error) {
+      this.logger.error('Failed to generate OpenAI embedding', {
+        apiUrl: this.model.apiUrl,
         error: getErrorMessage(error),
       });
       throw error;

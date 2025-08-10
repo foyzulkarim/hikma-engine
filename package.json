@@ -1,6 +1,6 @@
 {
   "name": "hikma-engine",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Code Knowledge Graph Indexer - A sophisticated TypeScript-based indexer that transforms Git repositories into multi-dimensional knowledge stores for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -25,9 +25,10 @@
     "url": "https://github.com/foyzulkarim/hikma-engine/issues"
   },
   "scripts": {
-    "index": "ts-node src/cli/main.ts index",
-    "search": "ts-node src/cli/main.ts search",
-    "rag": "ts-node src/cli/main.ts search --rag",
+    "embed": "node dist/cli/main.js embed",
+    "index": "npm run embed",
+    "search": "node dist/cli/main.js search",
+    "rag": "node dist/cli/main.js rag",
     "build": "tsc",
     "prepublishOnly": "npm run clean && npm run build",
     "test": "jest",
@@ -98,5 +99,8 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "volta": {
+    "node": "20.19.4"
   }
 }
