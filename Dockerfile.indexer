@@ -64,7 +64,7 @@ ENV HIKMA_SQLITE_VEC_EXTENSION=/app/extensions/vec0.so
 ENTRYPOINT ["dumb-init", "--"]
 
 # Default command - run the indexer
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/cli/main.js"]
 
 # Labels for metadata
 LABEL maintainer="Hikma Engine Team <support@hikma-engine.com>"
