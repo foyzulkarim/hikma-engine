@@ -1,0 +1,272 @@
+{
+  "repositories": [
+    {
+      "id": "repo-1",
+      "name": "sample-web-app",
+      "path": "/tmp/sample-web-app",
+      "files": [
+        {
+          "id": "file-1",
+          "path": "src/index.js",
+          "name": "index.js",
+          "language": "javascript",
+          "size": 1024,
+          "functions": [
+            {
+              "id": "func-1",
+              "name": "initializeApp",
+              "line": 10,
+              "column": 1,
+              "signature": "function initializeApp()",
+              "body": "function initializeApp() {\n  const app = express();\n  app.use(middleware());\n  return app;\n}",
+              "calls": ["express", "middleware"]
+            },
+            {
+              "id": "func-2",
+              "name": "startServer",
+              "line": 25,
+              "column": 1,
+              "signature": "function startServer(port)",
+              "body": "function startServer(port) {\n  app.listen(port, () => {\n    console.log('Server running on port ' + port);\n  });\n}",
+              "calls": ["app.listen", "console.log"]
+            }
+          ]
+        },
+        {
+          "id": "file-2",
+          "path": "src/utils.js",
+          "name": "utils.js",
+          "language": "javascript",
+          "size": 512,
+          "functions": [
+            {
+              "id": "func-3",
+              "name": "formatDate",
+              "line": 5,
+              "column": 1,
+              "signature": "function formatDate(date)",
+              "body": "function formatDate(date) {\n  return new Intl.DateTimeFormat('en-US').format(date);\n}",
+              "calls": ["Intl.DateTimeFormat"]
+            },
+            {
+              "id": "func-4",
+              "name": "validateEmail",
+              "line": 15,
+              "column": 1,
+              "signature": "function validateEmail(email)",
+              "body": "function validateEmail(email) {\n  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;\n  return regex.test(email);\n}",
+              "calls": ["RegExp.test"]
+            }
+          ]
+        },
+        {
+          "id": "file-3",
+          "path": "src/auth.py",
+          "name": "auth.py",
+          "language": "python",
+          "size": 768,
+          "functions": [
+            {
+              "id": "func-5",
+              "name": "authenticate_user",
+              "line": 8,
+              "column": 1,
+              "signature": "def authenticate_user(email: str, password: str)",
+              "body": "def authenticate_user(email: str, password: str):\n    user = find_user_by_email(email)\n    if user and verify_password(password, user.password):\n        return user\n    return None",
+              "calls": ["find_user_by_email", "verify_password"]
+            },
+            {
+              "id": "func-6",
+              "name": "generate_token",
+              "line": 20,
+              "column": 1,
+              "signature": "def generate_token(user_id: str)",
+              "body": "def generate_token(user_id: str):\n    payload = {'user_id': user_id, 'exp': datetime.utcnow() + timedelta(hours=24)}\n    return jwt.encode(payload, SECRET_KEY, algorithm='HS256')",
+              "calls": ["jwt.encode", "datetime.utcnow"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repo-2",
+      "name": "data-processor",
+      "path": "/tmp/data-processor",
+      "files": [
+        {
+          "id": "file-4",
+          "path": "processor.py",
+          "name": "processor.py",
+          "language": "python",
+          "size": 1536,
+          "functions": [
+            {
+              "id": "func-7",
+              "name": "process_csv",
+              "line": 12,
+              "column": 1,
+              "signature": "def process_csv(file_path: str)",
+              "body": "def process_csv(file_path: str):\n    with open(file_path, 'r') as file:\n        reader = csv.DictReader(file)\n        return list(reader)",
+              "calls": ["open", "csv.DictReader"]
+            },
+            {
+              "id": "func-8",
+              "name": "validate_data",
+              "line": 25,
+              "column": 1,
+              "signature": "def validate_data(data: List[Dict])",
+              "body": "def validate_data(data: List[Dict]):\n    errors = []\n    for row in data:\n        if not validate_row(row):\n            errors.append('Invalid row: ' + str(row))\n    return errors",
+              "calls": ["validate_row"]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "call_chains": [
+    {
+      "id": "chain-1",
+      "start_function": "initializeApp",
+      "end_function": "startServer",
+      "calls": [
+        {
+          "caller": "initializeApp",
+          "callee": "express",
+          "file": "src/index.js",
+          "line": 12
+        },
+        {
+          "caller": "initializeApp",
+          "callee": "middleware",
+          "file": "src/index.js",
+          "line": 13
+        },
+        {
+          "caller": "startServer",
+          "callee": "app.listen",
+          "file": "src/index.js",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "id": "chain-2",
+      "start_function": "authenticate_user",
+      "end_function": "generate_token",
+      "calls": [
+        {
+          "caller": "authenticate_user",
+          "callee": "find_user_by_email",
+          "file": "src/auth.py",
+          "line": 9
+        },
+        {
+          "caller": "authenticate_user",
+          "callee": "verify_password",
+          "file": "src/auth.py",
+          "line": 10
+        },
+        {
+          "caller": "generate_token",
+          "callee": "jwt.encode",
+          "file": "src/auth.py",
+          "line": 22
+        }
+      ]
+    }
+  ],
+  "search_queries": [
+    {
+      "query": "user authentication",
+      "results": [
+        {
+          "type": "function",
+          "name": "authenticate_user",
+          "file": "src/auth.py",
+          "score": 0.95,
+          "snippet": "def authenticate_user(email: str, password: str)"
+        },
+        {
+          "type": "function",
+          "name": "validateEmail",
+          "file": "src/utils.js",
+          "score": 0.78,
+          "snippet": "function validateEmail(email)"
+        }
+      ]
+    },
+    {
+      "query": "data processing",
+      "results": [
+        {
+          "type": "function",
+          "name": "process_csv",
+          "file": "processor.py",
+          "score": 0.92,
+          "snippet": "def process_csv(file_path: str)"
+        },
+        {
+          "type": "function",
+          "name": "validate_data",
+          "file": "processor.py",
+          "score": 0.85,
+          "snippet": "def validate_data(data: List[Dict])"
+        }
+      ]
+    }
+  ],
+  "test_scenarios": [
+    {
+      "name": "empty_database",
+      "description": "Test with completely empty database",
+      "stats": {
+        "repositories": 0,
+        "files": 0,
+        "functions": 0,
+        "calls": 0
+      }
+    },
+    {
+      "name": "single_file_single_function",
+      "description": "Test with one file containing one simple function",
+      "stats": {
+        "repositories": 1,
+        "files": 1,
+        "functions": 1,
+        "calls": 0
+      }
+    },
+    {
+      "name": "complex_call_chain",
+      "description": "Test with multiple files and complex call relationships",
+      "stats": {
+        "repositories": 1,
+        "files": 5,
+        "functions": 12,
+        "calls": 15
+      }
+    }
+  ],
+  "edge_cases": [
+    {
+      "name": "empty_function_body",
+      "description": "Function with no implementation",
+      "code": "function emptyFunction() {}"
+    },
+    {
+      "name": "recursive_function",
+      "description": "Function that calls itself",
+      "code": "function factorial(n) {\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}"
+    },
+    {
+      "name": "async_function",
+      "description": "Async function with await",
+      "code": "async function fetchData(url) {\n  const response = await fetch(url);\n  return response.json();\n}"
+    },
+    {
+      "name": "arrow_function",
+      "description": "ES6 arrow function",
+      "code": "const add = (a, b) => a + b;"
+    }
+  ]
+}
