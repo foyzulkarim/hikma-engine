@@ -545,9 +545,13 @@ export class EnhancedSearchService {
   /**
    * Deserializes embedding from database blob format.
    */
-  private deserializeEmbedding(blob: Buffer): number[] {
-    const float32Array = new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
-    return Array.from(float32Array);
+  private deserializeEmbedding(embedding: string | Buffer): number[] {
+    if (typeof embedding === 'string') {
+        return JSON.parse(embedding);
+    } else {
+        const float32Array = new Float32Array(embedding.buffer, embedding.byteOffset, embedding.byteLength / 4);
+        return Array.from(float32Array);
+    }
   }
 
   /**

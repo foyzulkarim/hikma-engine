@@ -102,7 +102,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "simple-git": "^3.27.0",
-    "sqlite-vec": "^0.1.0",
+    "sqlite-vec": "^0.1.6",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^11.1.0",

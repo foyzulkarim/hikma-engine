@@ -11,7 +11,7 @@ describe('API Integration Tests', () => {
 
   beforeAll(async () => {
     // Create test server
-    const serverInstance = await createAPIServer();
+    const serverInstance = await createAPIServer(process.cwd());
     app = serverInstance.getApp();
     server = serverInstance.getServer();
     // searchService = SearchService.getInstance(); // Temporarily disabled - no singleton pattern

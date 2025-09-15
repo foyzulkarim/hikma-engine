@@ -7,7 +7,7 @@ describe('Performance and Load Tests', () => {
   let server: any;
 
   beforeAll(async () => {
-    const serverInstance = await createAPIServer();
+    const serverInstance = await createAPIServer(process.cwd());
     app = serverInstance.getApp();
     server = serverInstance.getServer();
     

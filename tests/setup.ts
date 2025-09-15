@@ -7,6 +7,7 @@ beforeAll(() => {
   // Set test environment variables
   process.env.NODE_ENV = 'test';
   process.env.HIKMA_LOG_LEVEL = 'error'; // Reduce log noise in tests
+  process.env.HIKMA_SQLITE_VEC_EXTENSION = './extensions/vec0.so';
 });
 
 // Global test teardown

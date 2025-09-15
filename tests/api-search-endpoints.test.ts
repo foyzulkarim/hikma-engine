@@ -23,7 +23,7 @@ describe('Search API Endpoints', () => {
     });
 
     // Create server instance
-    server = createAPIServer({
+    server = createAPIServer(projectRoot, {
       port: 0, // Use random available port for testing
       host: 'localhost',
       cors: {

@@ -317,14 +317,14 @@ export class APIServer {
 /**
  * Creates and configures the API server with default settings.
  */
-export function createAPIServer(overrides: Partial<ServerConfig> = {}): APIServer {
+export function createAPIServer(projectRoot: string, overrides: Partial<ServerConfig> = {}): APIServer {
   // Initialize configuration if not already initialized
   const { initializeConfig, getConfig } = require('../config');
   try {
     getConfig();
   } catch (error) {
     // Configuration not initialized, initialize it
-    initializeConfig();
+    initializeConfig(projectRoot);
   }
 
   const defaultConfig: ServerConfig = {

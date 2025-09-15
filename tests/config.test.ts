@@ -46,7 +46,7 @@ describe('ConfigManager', () => {
       
       expect(aiConfig.embedding).toBeDefined();
       expect(aiConfig.summary).toBeDefined();
-      expect(aiConfig.embedding.model).toBe('Xenova/all-MiniLM-L6-v2');
+      expect(aiConfig.embedding.model).toBe('jinaai/jina-embeddings-v2-base-code');
     });
 
     it('should return indexing configuration', () => {

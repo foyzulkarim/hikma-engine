@@ -75,9 +75,16 @@ export class EmbeddingService {
           aiConfig.embedding.model
         );
         this.logger.info('Transformers.js embedding model loaded successfully');
+      } else if (aiConfig.embedding.provider === 'openai') {
+        await this.testOpenAIConnection();
+        this.model = {
+            provider: 'openai',
+            endpoint: aiConfig.embedding.localEndpoint,
+            apiKey: aiConfig.embedding.apiKey,
+        };
       } else {
         throw new Error(
-          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers'`
+          `Unsupported embedding provider: ${aiConfig.embedding.provider}. Supported providers: 'local', 'transformers', 'openai'`
         );
       }
 
@@ -90,6 +97,113 @@ export class EmbeddingService {
       operation();
       throw error;
     }
+  }
+
+  private async testOpenAIConnection(): Promise<void> {
+    const aiConfig = this.config.getAIConfig();
+    const endpoint = aiConfig.embedding.localEndpoint;
+
+    if (!endpoint) {
+        throw new Error('OpenAI endpoint not configured');
+    }
+
+    try {
+        this.logger.debug('Testing OpenAI connection', { endpoint });
+
+        const response = await fetch(`${endpoint}/v1/models`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(aiConfig.embedding.apiKey && { 'Authorization': `Bearer ${aiConfig.embedding.apiKey}` }),
+            },
+            signal: AbortSignal.timeout(5000),
+        });
+
+        if (!response.ok) {
+            throw new Error(`OpenAI server responded with status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (!result.data || result.data.length === 0) {
+            this.logger.warn('OpenAI server is running but no models are available', { endpoint });
+        } else {
+            this.logger.info('OpenAI connection successful', {
+                endpoint,
+                modelsAvailable: result.data.length,
+            });
+        }
+    } catch (error) {
+        this.logger.error('Failed to connect to OpenAI', {
+            endpoint,
+            error: getErrorMessage(error),
+        });
+        throw new Error(`Cannot connect to OpenAI at ${endpoint}: ${getErrorMessage(error)}`);
+    }
+  }
+
+  private async generateOpenAIEmbedding(text: string): Promise<number[]> {
+      const aiConfig = this.config.getAIConfig();
+      const endpoint = aiConfig.embedding.localEndpoint;
+
+      if (!endpoint) {
+          throw new Error('OpenAI endpoint not configured');
+      }
+
+      try {
+          this.logger.debug('Generating embedding via OpenAI', {
+              endpoint,
+              textLength: text.length,
+          });
+
+          const response = await fetch(`${endpoint}/v1/embeddings`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  ...(aiConfig.embedding.apiKey && { 'Authorization': `Bearer ${aiConfig.embedding.apiKey}` }),
+              },
+              body: JSON.stringify({
+                  input: text,
+                  model: aiConfig.embedding.model || 'default',
+              }),
+              signal: AbortSignal.timeout(30000),
+          });
+
+          if (!response.ok) {
+              const errorText = await response.text();
+              this.logger.error('OpenAI API error', {
+                  endpoint,
+                  status: response.status,
+                  error: errorText,
+              });
+              throw new Error(`OpenAI API error (${response.status}): ${errorText}`);
+          }
+
+          const result = await response.json();
+
+          if (!result.data || !Array.isArray(result.data) || result.data.length === 0) {
+              throw new Error('Invalid response format from OpenAI');
+          }
+
+          const embedding = result.data[0].embedding;
+
+          if (!Array.isArray(embedding) || embedding.length === 0) {
+              throw new Error('Invalid embedding format from OpenAI');
+          }
+
+          this.logger.debug('OpenAI embedding generated successfully', {
+              dimensions: embedding.length,
+              textLength: text.length,
+          });
+
+          return embedding;
+      } catch (error) {
+          this.logger.error('Failed to generate OpenAI embedding', {
+              endpoint,
+              error: getErrorMessage(error),
+          });
+          throw error;
+      }
   }
 
   /**
@@ -197,6 +311,13 @@ export class EmbeddingService {
       'provider' in this.model
     ) {
       return await this.generateLMStudioEmbedding(text);
+    } else if (
+        aiConfig.embedding.provider === 'openai' &&
+        this.model &&
+        typeof this.model === 'object' &&
+        'provider' in this.model
+    ) {
+        return await this.generateOpenAIEmbedding(text);
     } else if (
       aiConfig.embedding.provider === 'transformers' &&
       this.model &&

@@ -8,7 +8,7 @@ A sophisticated TypeScript-based code knowledge graph indexer that transforms Gi
 - **AST-based code structure extraction**: Deep understanding of code relationships
 - **Git integration**: Commit history analysis and incremental updates
 - **AI-enhanced summaries**: Intelligent file and directory summarization
-- **Vector embeddings**: Semantic similarity search capabilities
+- **Vector embeddings**: Semantic similarity search capabilities (supports Xenova and OpenAI)
 - **Multi-repository support**: Index and search across multiple repositories
 - **Unified CLI**: Single `hikma` command for all operations
 - **Polyglot persistence**: SQLite with sqlite-vec for unified storage
@@ -35,6 +35,18 @@ Create a `.env` file in your project root:
 # Database configuration
 HIKMA_SQLITE_PATH=./data/metadata.db
 HIKMA_SQLITE_VEC_EXTENSION=./extensions/vec0.dylib
+
+# AI Provider Configuration
+# Provider can be 'xenova' or 'openai'
+HIKMA_AI_PROVIDER=openai
+
+# For Xenova provider
+HIKMA_AI_EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2
+
+# For OpenAI provider
+HIKMA_AI_OPENAI_API_KEY=your-api-key
+HIKMA_AI_OPENAI_BASE_URL=http://localhost:11434/v1
+HIKMA_AI_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
 # Logging
 HIKMA_LOG_LEVEL=info

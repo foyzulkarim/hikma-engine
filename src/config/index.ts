@@ -16,8 +16,9 @@ export interface AIConfig {
   embedding: {
     model: string;
     batchSize: number;
-    provider: 'local' | 'transformers';
+    provider: 'local' | 'transformers' | 'openai';
     localEndpoint?: string;
+    apiKey?: string;
   };
   summary: {
     model: string;
