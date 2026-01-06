@@ -958,17 +958,15 @@ hikma-engine/
 
 ---
 
-## Open Questions
+## Design Decisions
 
-1. **Naming**: `hikma-mcp` or something more descriptive like `codebase-mcp`?
-
-2. **Scope**: Support multiple projects in one server, or one server per project?
-
-3. **Auto-index**: Should `serve` auto-run `init` if no index exists?
-
-4. **Watch mode**: Ship in Phase 1 or defer to Phase 2?
-
-5. **Python support**: Continue supporting Python embedding provider or focus on JS-only?
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Naming** | `hikma-mcp` | Keep brand consistency with hikma-engine |
+| **Scope** | One project per server | Simpler mental model, matches Claude Code pattern |
+| **Embedding runtime** | Node.js only (`@xenova/transformers`) | Zero external dependencies, powerful enough |
+| **Watch mode** | Defer to Phase 2 | Focus on core functionality first |
+| **Auto-index** | TBD | Could auto-run `init` if no index exists |
 
 ---
 
