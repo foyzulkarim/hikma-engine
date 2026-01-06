@@ -966,7 +966,7 @@ hikma-engine/
 | **Scope** | One project per server | Simpler mental model, matches Claude Code pattern |
 | **Embedding runtime** | Node.js only (`@xenova/transformers`) | Zero external dependencies, powerful enough |
 | **Watch mode** | Defer to Phase 2 | Focus on core functionality first |
-| **Auto-index** | TBD | Could auto-run `init` if no index exists |
+| **Auto-index** | No | Keep `init` and `serve` separate for explicit control and fast startup |
 
 ---
 
