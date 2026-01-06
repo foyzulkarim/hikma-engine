@@ -1,0 +1,55 @@
+{
+  "name": "hikma-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing hikma-engine code intelligence to AI CLIs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "hikma-mcp": "dist/cli/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js",
+    "serve": "node dist/cli/index.js serve",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-intelligence",
+    "semantic-search",
+    "claude-code",
+    "cursor",
+    "ai-cli"
+  ],
+  "author": "foyzulkarim",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foyzulkarim/hikma-engine.git",
+    "directory": "packages/hikma-mcp"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@xenova/transformers": "^2.17.0",
+    "better-sqlite3": "^11.0.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "glob": "^10.4.1",
+    "sqlite-vec": "^0.1.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
