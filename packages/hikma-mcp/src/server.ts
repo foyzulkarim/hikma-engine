@@ -15,6 +15,13 @@ import { SearchService } from './services/search-service';
 import { semanticSearchHandler } from './tools/semantic-search';
 import { getFileSummaryHandler } from './tools/get-file-summary';
 import { findSymbolHandler } from './tools/find-symbol';
+// Phase 2 tools
+import { findCallersHandler } from './tools/find-callers';
+import { findDependenciesHandler } from './tools/find-dependencies';
+import { findRelatedHandler } from './tools/find-related';
+// Phase 3 tools
+import { explainModuleHandler } from './tools/explain-module';
+import { getArchitectureHandler } from './tools/get-architecture';
 
 const VERSION = '0.1.0';
 
@@ -138,6 +145,135 @@ export class HikmaMcpServer {
               required: ['symbol_name'],
             },
           },
+          // Phase 2: find_callers
+          {
+            name: TOOL_DEFINITIONS.find_callers.name,
+            description: TOOL_DEFINITIONS.find_callers.description,
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                function_name: {
+                  type: 'string',
+                  description: 'Name of the function to find callers for',
+                },
+                file_path: {
+                  type: 'string',
+                  description: 'Narrow search to specific file',
+                },
+                depth: {
+                  type: 'number',
+                  description: 'How many levels up the call chain to traverse',
+                  minimum: 1,
+                  maximum: 5,
+                  default: 1,
+                },
+              },
+              required: ['function_name'],
+            },
+          },
+          // Phase 2: find_dependencies
+          {
+            name: TOOL_DEFINITIONS.find_dependencies.name,
+            description: TOOL_DEFINITIONS.find_dependencies.description,
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                file_path: {
+                  type: 'string',
+                  description: 'Path to the file to analyze',
+                },
+                direction: {
+                  type: 'string',
+                  enum: ['imports', 'imported_by', 'both'],
+                  description: 'Direction of dependencies to find',
+                  default: 'both',
+                },
+              },
+              required: ['file_path'],
+            },
+          },
+          // Phase 2: find_related
+          {
+            name: TOOL_DEFINITIONS.find_related.name,
+            description: TOOL_DEFINITIONS.find_related.description,
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                file_path: {
+                  type: 'string',
+                  description: 'Starting file',
+                },
+                line: {
+                  type: 'number',
+                  description: 'Specific line number (finds related to symbol at line)',
+                },
+                relationship_types: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['calls', 'called_by', 'imports', 'imported_by', 'same_module', 'similar_code'],
+                  },
+                  description: 'Types of relationships to find',
+                  default: ['calls', 'called_by', 'similar_code'],
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum results to return',
+                  minimum: 1,
+                  maximum: 20,
+                  default: 10,
+                },
+              },
+              required: ['file_path'],
+            },
+          },
+          // Phase 3: explain_module
+          {
+            name: TOOL_DEFINITIONS.explain_module.name,
+            description: TOOL_DEFINITIONS.explain_module.description,
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                query: {
+                  type: 'string',
+                  description: "Question about the codebase (e.g., 'How does authentication work?')",
+                },
+                scope: {
+                  type: 'string',
+                  description: "Limit to specific path or module (e.g., 'src/auth')",
+                },
+                max_context_files: {
+                  type: 'number',
+                  description: 'Maximum files to use as context',
+                  minimum: 1,
+                  maximum: 20,
+                  default: 10,
+                },
+              },
+              required: ['query'],
+            },
+          },
+          // Phase 3: get_architecture
+          {
+            name: TOOL_DEFINITIONS.get_architecture.name,
+            description: TOOL_DEFINITIONS.get_architecture.description,
+            inputSchema: {
+              type: 'object' as const,
+              properties: {
+                focus: {
+                  type: 'string',
+                  enum: ['full', 'modules', 'dependencies'],
+                  description: 'What aspect of architecture to focus on',
+                  default: 'full',
+                },
+                path: {
+                  type: 'string',
+                  description: 'Limit to specific directory',
+                },
+              },
+              required: [],
+            },
+          },
         ],
       };
     });
@@ -169,6 +305,43 @@ export class HikmaMcpServer {
 
           case 'find_symbol':
             return await findSymbolHandler(
+              args as Record<string, unknown>,
+              this.searchService!,
+              this.projectPath
+            );
+
+          // Phase 2 tools
+          case 'find_callers':
+            return await findCallersHandler(
+              args as Record<string, unknown>,
+              this.searchService!,
+              this.projectPath
+            );
+
+          case 'find_dependencies':
+            return await findDependenciesHandler(
+              args as Record<string, unknown>,
+              this.searchService!,
+              this.projectPath
+            );
+
+          case 'find_related':
+            return await findRelatedHandler(
+              args as Record<string, unknown>,
+              this.searchService!,
+              this.projectPath
+            );
+
+          // Phase 3 tools
+          case 'explain_module':
+            return await explainModuleHandler(
+              args as Record<string, unknown>,
+              this.searchService!,
+              this.projectPath
+            );
+
+          case 'get_architecture':
+            return await getArchitectureHandler(
               args as Record<string, unknown>,
               this.searchService!,
               this.projectPath

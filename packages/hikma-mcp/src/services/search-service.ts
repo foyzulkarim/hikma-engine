@@ -54,6 +54,29 @@ export interface SymbolInfo {
   exported?: boolean;
 }
 
+export interface CallerInfo {
+  name: string;
+  filePath: string;
+  line: number;
+  callSiteLine?: number;
+  depth: number;
+}
+
+export interface DependencyInfo {
+  module: string;
+  filePath?: string;
+  symbols: string[];
+  isExternal: boolean;
+}
+
+export interface RelatedCodeInfo {
+  filePath: string;
+  line: number;
+  name?: string;
+  relationship: string;
+  relevance: number;
+}
+
 export class SearchService {
   private db: DatabaseType;
   private embeddingPipeline: any = null;
@@ -456,6 +479,390 @@ export class SearchService {
         nodeTypes: {},
         vectorEnabled: this.vectorEnabled,
       };
+    }
+  }
+
+  // ============================================
+  // Phase 2: Graph Query Methods
+  // ============================================
+
+  /**
+   * Find functions that call a given function
+   */
+  async findCallers(functionName: string, depth: number = 1): Promise<CallerInfo[]> {
+    try {
+      // First, find the target function in graph_nodes
+      const targetNodes = this.db.prepare(`
+        SELECT id, business_key, file_path, line, properties
+        FROM graph_nodes
+        WHERE (business_key LIKE ? OR properties LIKE ?)
+          AND node_type IN ('FunctionNode', 'CodeNode', 'MethodNode')
+        LIMIT 5
+      `).all(`%${functionName}%`, `%"name":"${functionName}"%`) as any[];
+
+      if (targetNodes.length === 0) {
+        return [];
+      }
+
+      const callers: CallerInfo[] = [];
+      const visited = new Set<string>();
+
+      // Recursively find callers up to specified depth
+      const findCallersRecursive = (nodeIds: string[], currentDepth: number) => {
+        if (currentDepth > depth || nodeIds.length === 0) return;
+
+        for (const nodeId of nodeIds) {
+          if (visited.has(nodeId)) continue;
+          visited.add(nodeId);
+
+          // Find edges where this node is the target (CALLS relationship)
+          const edges = this.db.prepare(`
+            SELECT e.source_id, e.source_business_key, e.line as call_line,
+                   n.file_path, n.line, n.properties
+            FROM graph_edges e
+            JOIN graph_nodes n ON e.source_id = n.id
+            WHERE e.target_id = ?
+              AND e.edge_type = 'CALLS'
+          `).all(nodeId) as any[];
+
+          for (const edge of edges) {
+            const props = this.safeParseJson(edge.properties);
+            const name = props?.name || edge.source_business_key?.split(':').pop() || 'unknown';
+
+            if (!this.isTestFile(edge.file_path)) {
+              callers.push({
+                name,
+                filePath: edge.file_path,
+                line: edge.line || 1,
+                callSiteLine: edge.call_line,
+                depth: currentDepth,
+              });
+            }
+
+            // Recurse to find callers of callers
+            if (currentDepth < depth) {
+              findCallersRecursive([edge.source_id], currentDepth + 1);
+            }
+          }
+        }
+      };
+
+      const targetIds = targetNodes.map(n => n.id);
+      findCallersRecursive(targetIds, 1);
+
+      return callers;
+    } catch (error) {
+      logger.error(`Failed to find callers: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Find functions that a given function calls
+   */
+  async findCallees(functionName: string, depth: number = 1): Promise<CallerInfo[]> {
+    try {
+      // Find the source function
+      const sourceNodes = this.db.prepare(`
+        SELECT id, business_key, file_path, line, properties
+        FROM graph_nodes
+        WHERE (business_key LIKE ? OR properties LIKE ?)
+          AND node_type IN ('FunctionNode', 'CodeNode', 'MethodNode')
+        LIMIT 5
+      `).all(`%${functionName}%`, `%"name":"${functionName}"%`) as any[];
+
+      if (sourceNodes.length === 0) {
+        return [];
+      }
+
+      const callees: CallerInfo[] = [];
+      const visited = new Set<string>();
+
+      const findCalleesRecursive = (nodeIds: string[], currentDepth: number) => {
+        if (currentDepth > depth || nodeIds.length === 0) return;
+
+        for (const nodeId of nodeIds) {
+          if (visited.has(nodeId)) continue;
+          visited.add(nodeId);
+
+          // Find edges where this node is the source (CALLS relationship)
+          const edges = this.db.prepare(`
+            SELECT e.target_id, e.target_business_key, e.line as call_line,
+                   n.file_path, n.line, n.properties
+            FROM graph_edges e
+            JOIN graph_nodes n ON e.target_id = n.id
+            WHERE e.source_id = ?
+              AND e.edge_type = 'CALLS'
+          `).all(nodeId) as any[];
+
+          for (const edge of edges) {
+            const props = this.safeParseJson(edge.properties);
+            const name = props?.name || edge.target_business_key?.split(':').pop() || 'unknown';
+
+            if (!this.isTestFile(edge.file_path)) {
+              callees.push({
+                name,
+                filePath: edge.file_path,
+                line: edge.line || 1,
+                callSiteLine: edge.call_line,
+                depth: currentDepth,
+              });
+            }
+
+            if (currentDepth < depth) {
+              findCalleesRecursive([edge.target_id], currentDepth + 1);
+            }
+          }
+        }
+      };
+
+      const sourceIds = sourceNodes.map(n => n.id);
+      findCalleesRecursive(sourceIds, 1);
+
+      return callees;
+    } catch (error) {
+      logger.error(`Failed to find callees: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Find dependencies (imports) for a file
+   */
+  async findDependencies(filePath: string): Promise<{
+    imports: DependencyInfo[];
+    importedBy: DependencyInfo[];
+  }> {
+    try {
+      const imports: DependencyInfo[] = [];
+      const importedBy: DependencyInfo[] = [];
+
+      // Find imports from this file
+      const importEdges = this.db.prepare(`
+        SELECT e.target_business_key, e.properties,
+               n.file_path as target_file
+        FROM graph_edges e
+        LEFT JOIN graph_nodes n ON e.target_id = n.id
+        WHERE e.source_business_key LIKE ?
+          AND e.edge_type IN ('IMPORTS', 'REFERENCES')
+      `).all(`%${filePath}%`) as any[];
+
+      for (const edge of importEdges) {
+        const props = this.safeParseJson(edge.properties);
+        const moduleName = edge.target_business_key || props?.module || 'unknown';
+        const isExternal = !edge.target_file || edge.target_file.includes('node_modules');
+
+        imports.push({
+          module: moduleName,
+          filePath: edge.target_file,
+          symbols: props?.symbols || [],
+          isExternal,
+        });
+      }
+
+      // Find files that import this file
+      const importedByEdges = this.db.prepare(`
+        SELECT e.source_business_key, e.properties,
+               n.file_path as source_file
+        FROM graph_edges e
+        LEFT JOIN graph_nodes n ON e.source_id = n.id
+        WHERE e.target_business_key LIKE ?
+          AND e.edge_type IN ('IMPORTS', 'REFERENCES')
+      `).all(`%${filePath}%`) as any[];
+
+      for (const edge of importedByEdges) {
+        const props = this.safeParseJson(edge.properties);
+
+        if (edge.source_file && !this.isTestFile(edge.source_file)) {
+          importedBy.push({
+            module: edge.source_file,
+            filePath: edge.source_file,
+            symbols: props?.symbols || [],
+            isExternal: false,
+          });
+        }
+      }
+
+      return { imports, importedBy };
+    } catch (error) {
+      logger.error(`Failed to find dependencies: ${error}`);
+      return { imports: [], importedBy: [] };
+    }
+  }
+
+  /**
+   * Find code related to a given location
+   */
+  async findRelated(
+    filePath: string,
+    line?: number,
+    relationshipTypes: string[] = ['calls', 'called_by', 'similar_code']
+  ): Promise<RelatedCodeInfo[]> {
+    const related: RelatedCodeInfo[] = [];
+
+    try {
+      // Find the node at this location
+      let nodeQuery = `
+        SELECT id, node_type, properties, file_path, line
+        FROM graph_nodes
+        WHERE file_path LIKE ?
+      `;
+      const params: any[] = [`%${filePath}%`];
+
+      if (line) {
+        nodeQuery += ` AND line <= ? ORDER BY line DESC LIMIT 1`;
+        params.push(line);
+      } else {
+        nodeQuery += ` LIMIT 1`;
+      }
+
+      const sourceNode = this.db.prepare(nodeQuery).get(...params) as any;
+
+      if (!sourceNode) {
+        // Fall back to semantic search for similar code
+        if (relationshipTypes.includes('similar_code')) {
+          const searchResults = await this.semanticSearch(filePath, { limit: 5 });
+          for (const result of searchResults) {
+            if (result.filePath !== filePath) {
+              related.push({
+                filePath: result.filePath,
+                line: result.lineStart || 1,
+                name: result.name,
+                relationship: 'similar_code',
+                relevance: result.similarity,
+              });
+            }
+          }
+        }
+        return related;
+      }
+
+      // Find calls from this node
+      if (relationshipTypes.includes('calls')) {
+        const callees = await this.findCallees(sourceNode.id, 1);
+        for (const callee of callees.slice(0, 5)) {
+          related.push({
+            filePath: callee.filePath,
+            line: callee.line,
+            name: callee.name,
+            relationship: 'calls',
+            relevance: 0.9,
+          });
+        }
+      }
+
+      // Find callers of this node
+      if (relationshipTypes.includes('called_by')) {
+        const callers = await this.findCallers(sourceNode.id, 1);
+        for (const caller of callers.slice(0, 5)) {
+          related.push({
+            filePath: caller.filePath,
+            line: caller.line,
+            name: caller.name,
+            relationship: 'called_by',
+            relevance: 0.9,
+          });
+        }
+      }
+
+      // Find similar code using embeddings
+      if (relationshipTypes.includes('similar_code')) {
+        const props = this.safeParseJson(sourceNode.properties);
+        const searchText = props?.name || props?.signature || filePath;
+        const searchResults = await this.semanticSearch(searchText, { limit: 5 });
+
+        for (const result of searchResults) {
+          if (result.filePath !== filePath) {
+            related.push({
+              filePath: result.filePath,
+              line: result.lineStart || 1,
+              name: result.name,
+              relationship: 'similar_code',
+              relevance: result.similarity,
+            });
+          }
+        }
+      }
+
+      // Find files in same module
+      if (relationshipTypes.includes('same_module')) {
+        const dirPath = path.dirname(filePath);
+        const sameModuleFiles = this.db.prepare(`
+          SELECT DISTINCT file_path
+          FROM graph_nodes
+          WHERE file_path LIKE ?
+            AND file_path != ?
+          LIMIT 5
+        `).all(`${dirPath}%`, filePath) as any[];
+
+        for (const file of sameModuleFiles) {
+          if (!this.isTestFile(file.file_path)) {
+            related.push({
+              filePath: file.file_path,
+              line: 1,
+              relationship: 'same_module',
+              relevance: 0.7,
+            });
+          }
+        }
+      }
+
+      return related;
+    } catch (error) {
+      logger.error(`Failed to find related code: ${error}`);
+      return related;
+    }
+  }
+
+  /**
+   * Get all files in the index
+   */
+  async getAllFiles(): Promise<string[]> {
+    try {
+      const files = this.db.prepare(`
+        SELECT DISTINCT file_path FROM graph_nodes
+        WHERE file_path IS NOT NULL
+        ORDER BY file_path
+      `).all() as any[];
+
+      return files
+        .map(f => f.file_path)
+        .filter(f => !this.isTestFile(f));
+    } catch (error) {
+      logger.error(`Failed to get all files: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get module/directory structure
+   */
+  async getModuleStructure(): Promise<Record<string, string[]>> {
+    try {
+      const files = await this.getAllFiles();
+      const modules: Record<string, string[]> = {};
+
+      for (const file of files) {
+        const dir = path.dirname(file);
+        if (!modules[dir]) {
+          modules[dir] = [];
+        }
+        modules[dir].push(path.basename(file));
+      }
+
+      return modules;
+    } catch (error) {
+      logger.error(`Failed to get module structure: ${error}`);
+      return {};
+    }
+  }
+
+  private safeParseJson(str: string | null): any {
+    if (!str) return {};
+    try {
+      return JSON.parse(str);
+    } catch {
+      return {};
     }
   }
 

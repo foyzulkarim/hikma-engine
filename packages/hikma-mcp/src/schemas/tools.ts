@@ -168,10 +168,130 @@ export const FindSymbolOutputSchema = z.object({
 export type FindSymbolOutput = z.infer<typeof FindSymbolOutputSchema>;
 
 // ============================================
+// Phase 2: find_callers
+// ============================================
+
+export const FindCallersInputSchema = z.object({
+  function_name: z
+    .string()
+    .min(1)
+    .describe('Name of the function to find callers for'),
+
+  file_path: z
+    .string()
+    .optional()
+    .describe('Narrow search to specific file'),
+
+  depth: z
+    .number()
+    .min(1)
+    .max(5)
+    .default(1)
+    .describe('How many levels up the call chain to traverse'),
+});
+
+export type FindCallersInput = z.infer<typeof FindCallersInputSchema>;
+
+// ============================================
+// Phase 2: find_dependencies
+// ============================================
+
+export const FindDependenciesInputSchema = z.object({
+  file_path: z
+    .string()
+    .min(1)
+    .describe('Path to the file to analyze'),
+
+  direction: z
+    .enum(['imports', 'imported_by', 'both'])
+    .default('both')
+    .describe('Direction of dependencies to find'),
+});
+
+export type FindDependenciesInput = z.infer<typeof FindDependenciesInputSchema>;
+
+// ============================================
+// Phase 2: find_related
+// ============================================
+
+export const FindRelatedInputSchema = z.object({
+  file_path: z
+    .string()
+    .min(1)
+    .describe('Starting file'),
+
+  line: z
+    .number()
+    .optional()
+    .describe('Specific line number (finds related to symbol at line)'),
+
+  relationship_types: z
+    .array(z.enum([
+      'calls', 'called_by', 'imports', 'imported_by',
+      'same_module', 'similar_code'
+    ]))
+    .default(['calls', 'called_by', 'similar_code'])
+    .describe('Types of relationships to find'),
+
+  limit: z
+    .number()
+    .min(1)
+    .max(20)
+    .default(10)
+    .describe('Maximum results to return'),
+});
+
+export type FindRelatedInput = z.infer<typeof FindRelatedInputSchema>;
+
+// ============================================
+// Phase 3: explain_module
+// ============================================
+
+export const ExplainModuleInputSchema = z.object({
+  query: z
+    .string()
+    .min(1)
+    .describe("Question about the codebase (e.g., 'How does authentication work?')"),
+
+  scope: z
+    .string()
+    .optional()
+    .describe("Limit to specific path or module (e.g., 'src/auth')"),
+
+  max_context_files: z
+    .number()
+    .min(1)
+    .max(20)
+    .default(10)
+    .describe('Maximum files to use as context'),
+});
+
+export type ExplainModuleInput = z.infer<typeof ExplainModuleInputSchema>;
+
+// ============================================
+// Phase 3: get_architecture
+// ============================================
+
+export const GetArchitectureInputSchema = z.object({
+  focus: z
+    .enum(['full', 'modules', 'dependencies'])
+    .default('full')
+    .describe('What aspect of architecture to focus on'),
+
+  path: z
+    .string()
+    .optional()
+    .describe('Limit to specific directory'),
+});
+
+export type GetArchitectureInput = z.infer<typeof GetArchitectureInputSchema>;
+
+// ============================================
 // Tool metadata for MCP registration
 // ============================================
 
 export const TOOL_DEFINITIONS = {
+  // Phase 1 Tools
   semantic_search: {
     name: 'semantic_search',
     description:
@@ -196,5 +316,47 @@ export const TOOL_DEFINITIONS = {
       'Find where a symbol (function, class, variable) is defined and where it is used. ' +
       'Use this to understand the scope and usage patterns of specific code elements.',
     inputSchema: FindSymbolInputSchema,
+  },
+
+  // Phase 2 Tools
+  find_callers: {
+    name: 'find_callers',
+    description:
+      'Find what functions call a given function. Traces the call chain up to see where ' +
+      'a function is invoked from. Use this to understand impact of changes or trace execution flow.',
+    inputSchema: FindCallersInputSchema,
+  },
+
+  find_dependencies: {
+    name: 'find_dependencies',
+    description:
+      'Find what a file imports and what imports it. Shows the dependency graph around a file. ' +
+      'Use this to understand module relationships and impact of changes.',
+    inputSchema: FindDependenciesInputSchema,
+  },
+
+  find_related: {
+    name: 'find_related',
+    description:
+      'Find code related to a given location through various relationships (calls, imports, ' +
+      'similar code). Use this to discover connected code when exploring the codebase.',
+    inputSchema: FindRelatedInputSchema,
+  },
+
+  // Phase 3 Tools
+  explain_module: {
+    name: 'explain_module',
+    description:
+      'Get an AI-generated explanation of how part of the codebase works. Searches for relevant ' +
+      'code and synthesizes an explanation. Use this to understand complex systems or unfamiliar code.',
+    inputSchema: ExplainModuleInputSchema,
+  },
+
+  get_architecture: {
+    name: 'get_architecture',
+    description:
+      'Get a high-level overview of the codebase structure, modules, and key patterns. ' +
+      'Use this to understand the overall organization of a project.',
+    inputSchema: GetArchitectureInputSchema,
   },
 } as const;
